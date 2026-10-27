@@ -51,3 +51,19 @@ def test_empty_rounds_have_stable_schema():
     result = build_rounds(pl.DataFrame(schema=["tick", "event_type"], strict=False))
     assert result.is_empty()
     assert "freeze_end_tick" in result
+
+
+@pytest.mark.parametrize(("winner", "expected"), [
+    (2, 2), (3, 3), (2.0, 2), (3.0, 3),
+    ("T", 2), ("CT", 3), ("2", 2), ("3", 3), (" ct ", 3),
+    (None, None), ("unknown", None), (0, None),
+])
+def test_round_winner_accepts_parser_side_names_and_numeric_codes(winner, expected):
+    events = pl.DataFrame({"tick": [10, 50],
+                           "event_type": ["round_start", "round_end"],
+                           "winner": [None, winner]})
+    before = events.clone()
+    rounds = build_rounds(events)
+    assert rounds["winner"].dtype == pl.Int64
+    assert rounds["winner"].to_list() == [expected]
+    assert events.equals(before)

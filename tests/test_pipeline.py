@@ -60,6 +60,33 @@ def test_failed_parse_does_not_publish_manifest(tmp_path, monkeypatch):
     assert not list((tmp_path / "data").rglob("manifest.json"))
 
 
+@pytest.mark.parametrize("winners", [["T", "CT"], [2, 3]])
+def test_ingest_normalizes_round_winners_and_reuses_completed_cache(tmp_path, monkeypatch, winners):
+    calls = []
+
+    class WinnerParser(FakeParser):
+        def parse_events(self, wanted, other):
+            calls.append(True)
+            return [
+                ("round_start", pl.DataFrame({"tick": [10, 100], "is_warmup_period": [False, False]})),
+                ("round_end", pl.DataFrame({"tick": [50, 150], "winner": winners})),
+            ]
+
+    monkeypatch.setattr(pipeline, "DemoParser", WinnerParser)
+    demo = tmp_path / "winner.dem"
+    demo.write_bytes(b"PBDEMS2\x00fixture")
+    destination, manifest = pipeline.ingest(demo, tmp_path / "data")
+    events, rounds = pipeline.load_dataset(destination)
+    assert manifest["round_count"] == 2
+    assert rounds["winner"].to_list() == [2, 3]
+    assert rounds["winner"].dtype == pl.Int64
+    assert events.filter(pl.col("event_type") == "round_end")["winner"].to_list() == winners
+    before = {path.name: path.read_bytes() for path in destination.glob("*.parquet")}
+    assert pipeline.ingest(demo, tmp_path / "data")[0] == destination
+    assert len(calls) == 1
+    assert before == {path.name: path.read_bytes() for path in destination.glob("*.parquet")}
+
+
 def test_file_validation(tmp_path):
     demo = tmp_path / "bad.dem"
     demo.write_bytes(b"not a demo")
