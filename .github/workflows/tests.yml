@@ -1,0 +1,46 @@
+name: Code tests
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      public_demo:
+        description: 'Use the pinned public Mirage demo for visual evidence'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    # Keep the runner OS compatible with the locked Playwright browser dependencies.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.23'
+          enable-cache: true
+      - run: uv sync --locked --group browser
+      - run: uv run --locked --group browser playwright install --with-deps chromium
+      - name: Prepare optional public demo
+        id: demo
+        if: github.event_name == 'workflow_dispatch' && inputs.public_demo
+        run: uv run --locked python scripts/prepare-visual-demo.py --github-output "$GITHUB_OUTPUT"
+      - name: Run tests and capture visual evidence
+        env:
+          CS2TA_VISUAL_DATASET: ${{ steps.demo.outputs.dataset }}
+          CS2TA_VISUAL_MAP_CACHE: ${{ steps.demo.outputs.map_cache }}
+        run: uv run --locked --group browser pytest -q --visual-artifacts artifacts/browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-visual-evidence
+          path: artifacts/browser/
+          retention-days: 14
+          if-no-files-found: warn
+      - run: uv build --wheel

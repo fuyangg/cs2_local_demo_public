@@ -1,0 +1,10 @@
+# Committed defaults. Optional overrides: config/local.dev.toml / local.prod.toml.
+[dev]
+port = 8501
+data_dir = "data/dev"
+map_cache_dir = ".cache/maps/dev"
+
+[prod]
+port = 8502
+data_dir = "data/prod"
+map_cache_dir = ".cache/maps/prod"

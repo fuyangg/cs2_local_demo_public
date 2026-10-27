@@ -1,0 +1,72 @@
+name: Reviewed production release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Stable version, e.g. v0.2.0'
+        required: true
+        type: string
+      commit:
+        description: 'Full 40-character SHA already previewed on dev and merged into main'
+        required: true
+        type: string
+      preview_confirmed:
+        description: 'I checked the content and UI of this exact commit in dev'
+        required: true
+        default: false
+        type: boolean
+      review_notes:
+        description: 'What was checked and confirmed'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main' && inputs.preview_confirmed
+    # Keep the runner OS compatible with the locked Playwright browser dependencies.
+    runs-on: ubuntu-24.04
+    environment: prod
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_COMMIT: ${{ inputs.commit }}
+      REVIEW_NOTES: ${{ inputs.review_notes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+      - name: Require an exact commit already integrated into main
+        run: |
+          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
+          git merge-base --is-ancestor HEAD origin/main
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.23'
+          enable-cache: true
+      - run: uv sync --locked --group browser
+      - run: uv run --locked --group browser playwright install --with-deps chromium
+      - name: Test the exact reviewed candidate
+        run: uv run --locked --group browser python -m cs2ta.release prepare "$RELEASE_VERSION" --expected-commit "$RELEASE_COMMIT"
+      - name: Record the human confirmation from this manual run
+        run: |
+          uv run --locked --group browser python -m cs2ta.release approve "$RELEASE_VERSION" \
+            --commit "$RELEASE_COMMIT" --reviewer "$GITHUB_ACTOR" \
+            --notes "$REVIEW_NOTES" --confirm-preview
+      - name: Publish the approved annotated tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          uv run --locked --group browser python -m cs2ta.release publish "$RELEASE_VERSION" --push
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-evidence-${{ inputs.version }}
+          path: .release/
+      - name: Explain the local deployment step
+        run: |
+          printf 'Approved tag `%s` published.\n\nRun locally from dev: `bash scripts/release.sh install %s`\n' "$RELEASE_VERSION" "$RELEASE_VERSION" >> "$GITHUB_STEP_SUMMARY"

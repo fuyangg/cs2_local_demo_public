@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;color:#e5edf5;background:#0d1420;font-size:14px}
+*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;padding:14px}#app{max-width:1800px;margin:auto}details{border:1px solid #27374d;border-radius:8px;padding:8px;margin:8px 0}summary{cursor:pointer;color:#bfcfe0;margin-bottom:8px}.slot{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;border-radius:50%;font-weight:700;color:#101510}.legend{display:flex;gap:12px;flex-wrap:wrap;margin:8px 0;color:#becbd9;font-size:12px}.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px}#app:fullscreen{max-width:none;width:100vw;height:100vh;overflow:auto;background:#0d1420;padding:12px;display:flex;flex-direction:column}#app:fullscreen #stage{flex:1;min-height:240px}#app:fullscreen canvas{height:100%!important}#app:fullscreen #players{max-height:85px}#app:fullscreen details{margin:4px 0}button,select,input{font:inherit}
+button,select{background:#1b293c;color:#e5edf5;border:1px solid #35465d;border-radius:7px;padding:7px 10px}
+button{cursor:pointer}button:hover{background:#30445e}button:disabled{opacity:.4;cursor:default}
+#play{background:#176546;min-width:80px}.bar{display:flex;flex-wrap:wrap;align-items:center;gap:9px;margin-bottom:10px}
+label{display:inline-flex;align-items:center;gap:4px}input[type=checkbox]{accent-color:#64d8b1}
+input[type=number]{width:73px;background:#1b293c;color:#e5edf5;border:1px solid #35465d;border-radius:5px;padding:5px}
+.hint{font-size:12px;color:#9faec1;margin:6px 0 10px}.round{border-left:4px solid;padding:5px 8px;background:#162233;border-radius:4px}
+#stage{position:relative;background:#101510;border:1px solid #35465d;border-radius:10px;overflow:hidden}
+canvas{width:100%;height:560px;display:block;touch-action:none;cursor:grab}canvas:active{cursor:grabbing}
+#tooltip{position:absolute;display:none;pointer-events:none;white-space:pre-line;background:#0b1220ee;border:1px solid #7590a9;border-radius:7px;padding:8px;font-size:12px;z-index:2}
+#timeline{width:100%;accent-color:#64d8b1;cursor:ew-resize;margin:12px 0 4px}
+.timebar{display:flex;justify-content:space-between;font-variant-numeric:tabular-nums;color:#becbd9}
+#players{display:flex;gap:10px;flex-wrap:wrap;max-height:280px;overflow:auto}.team-group{border:1px solid #35465d;border-radius:8px;padding:8px;min-width:240px;flex:1}.team-roster{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}.team-title{display:flex;justify-content:space-between;align-items:center;gap:8px}#utilityList{max-height:190px;overflow:auto;display:grid;gap:5px;margin:8px 0}#utilityList button{text-align:left;font-size:12px}.utility-types{display:flex;gap:12px;flex-wrap:wrap}
+.player{display:flex;gap:5px;align-items:center;background:#172436;padding:5px 7px;border-radius:6px}
+.player button{padding:2px 5px;font-size:12px}.player span{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#playerSearch{background:#172436;color:#e5edf5;border:1px solid #35465d;border-radius:6px;padding:6px;width:160px}
+#roundStatus{font-size:12px;color:#a9b9cb;min-height:20px;margin:7px 0}
+@media(max-width:650px){body{padding:6px}canvas{height:430px}.bar{gap:6px}}
+</style></head>
+<body>
+<div id="app">
+<div class="bar">
+ <button id="play">▶ 播放</button><button id="restart">回到开头</button>
+
+ <label>速度 <select id="speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select></label>
+ <label><input id="loop" type="checkbox">循环</label>
+ <label id="floorControl">楼层 <select id="floor"><option value="upper">上层 / A 点</option><option value="lower">下层 / B 点</option></select></label>
+ <label>地图大小 <select id="mapSize"><option value="400">小</option><option value="560" selected>标准</option><option value="760">大</option></select></label>
+ <button id="resetView">地图复位</button><button id="fullscreen">⛶ 全屏播放</button><button id="openWindow">独立窗口</button>
+</div>
+<details id="roundPanel"><summary>显示哪些回合（点击展开勾选）</summary><div class="bar" id="rounds" aria-label="叠加回合"></div></details>
+<div class="legend" id="colorLegend"><span><i style="background:#f4d03f"></i>0 黄</span><span><i style="background:#aa78ed"></i>1 紫</span><span><i style="background:#63c66f"></i>2 绿</span><span><i style="background:#579bf2"></i>3 蓝</span><span><i style="background:#f39a45"></i>4 橙</span><span>CT ━ 实线　T ┄ 虚线</span><span>编号缺失时显示灰色</span></div><div id="viewerMessage" class="hint" role="status"></div>
+<div id="stage"><canvas id="map" aria-label="回合轨迹地图"></canvas><div id="tooltip"></div></div>
+<input id="timeline" type="range" min="0" step="1" value="0" aria-label="回合时间轴">
+<div class="timebar"><output id="time">相对 Tick 0</output><span id="duration"></span></div>
+<div id="roundStatus" aria-live="off"></div>
+<div class="bar"><strong>选择玩家</strong><button id="allPlayers">全选</button><button id="noPlayers">清空</button><input id="playerSearch" type="search" placeholder="搜索玩家" aria-label="搜索玩家"><span class="hint">点击“单看”只显示一人，勾选可显示多人。</span></div>
+<div id="players"></div>
+<details id="utilityPanel" open><summary>道具追踪 · 飞行 / 落点 / 范围</summary>
+<div class="bar"><label><input id="showUtility" type="checkbox" checked>显示道具</label>
+<label>查看方式 <select id="utilityMode"><option value="current">当前时刻</option><option value="overview">本回合落点总览（含未来事件）</option></select></label>
+<label><input id="utilityRanges" type="checkbox" checked>范围示意</label>
+<label><input id="utilityFollow" type="checkbox" checked>跟随玩家选择</label></div>
+<div id="utilityTypes" class="utility-types"></div>
+<div class="hint">S 烟雾 144 / G 手雷 350 / M 火 180 世界单位为估算半径；F 闪光 500 仅作定位示意，不代表致盲范围。圆形不考虑墙体、视线、高低差或烟雾形变。实测飞行轨迹用虚线，缺失段不连接；最后观测点不当作落点。示意圈从爆开起固定显示：G 手雷 / F 闪光 3 秒、S 烟雾 15 秒、M 火 5 秒，按播放基准换算，并非实际伤害或作用持续时间。未知投掷者单独保留。</div>
+<div id="utilityList" aria-label="道具事件列表"></div></details>
+<details><summary>播放选项与高级设置</summary><div class="bar">
+<button id="previous" title="上一个采样">◀ 上一帧</button><button id="next" title="下一个采样">下一帧 ▶</button>
+ <label><input id="trails" type="checkbox" checked>轨迹</label>
+ <label>玩家轨迹保留 <select id="trailRetention"><option value="2">2 秒</option><option value="5">5 秒</option><option value="10" selected>10 秒</option><option value="20">20 秒</option><option value="30">30 秒</option><option value="60">60 秒</option><option value="all">一直保留（最长）</option></select></label>
+ <label>道具保留 <select id="utilityRetention"><option value="2">2 秒</option><option value="5">5 秒</option><option value="10" selected>10 秒</option><option value="20">20 秒</option><option value="30">30 秒</option><option value="60">60 秒</option><option value="all">一直保留（最长）</option></select></label>
+ <label><input id="names" type="checkbox" checked>姓名</label>
+ <label><input id="alive" type="checkbox" checked>仅存活</label>
+ <label><input id="smooth" type="checkbox" checked>平滑插值（仅显示）</label>
+ <label>播放基准 <input id="tickRate" type="number" value="64" min="1" max="1024"> Tick/秒</label>
+</div>
+<div class="hint">两种保留时长独立设置，默认 10 秒，按播放基准 Tick/秒换算，与倍速无关。道具示意圈结束后保留所选时长，再清除标记与轨迹；总览模式仍显示整回合。拖动时间轴即时显示；空格播放/暂停。滚轮缩放、拖动地图平移。时间轴按相对 Tick 对齐，播放基准可调，未自动确认 Demo 的 Tick 频率。插值不跨越缺失、死亡或楼层变化。</div>
+</details>
+</div>
+
+<script id="payload" type="application/json">__PAYLOAD_JSON__</script>
+<script>
+"use strict";
+const ORIGINAL_HTML="<!doctype html>"+document.documentElement.outerHTML;
+const DATA=JSON.parse(document.getElementById("payload").textContent);
+const $=id=>document.getElementById(id), canvas=$("map"), ctx=canvas.getContext("2d");
+const SLOT_COLORS=["#f4d03f","#aa78ed","#63c66f","#579bf2","#f39a45"];
+const INITIAL=DATA.initialState||{};
+function slotColor(id){return Number.isInteger(id)&&id>=0&&id<=4?SLOT_COLORS[id]:"#a7afba";}
+function strokeStyleFor(sample){return {color:slotColor(sample[7]),dash:sample[6]===2?[8,5]:sample[6]===3?[]:[2,4]};}
+const selectedPlayers=new Set(INITIAL.players||DATA.players.map(p=>p.id)), selectedRounds=new Set(INITIAL.rounds||DATA.rounds.map(r=>r.id));
+const names=new Map(DATA.players.map(p=>[p.id,p.name]));
+let time=Math.max(0,Math.min(DATA.maxTick,INITIAL.time||0)), playing=false, previousFrame=null, request=null, dirty=true, markers=[], utilityMarkers=[], drawCount=0;
+let zoom=1, panX=0, panY=0, drag=null, resumeAfterSeek=false;
+const images={};
+const trailCanvas=document.createElement("canvas"),trailCtx=trailCanvas.getContext("2d");let trailCacheKey="";
+const width=()=>canvas.clientWidth, height=()=>canvas.clientHeight;
+const bounds=DATA.bounds, centerX=(bounds[0]+bounds[2])/2, centerY=(bounds[1]+bounds[3])/2;
+function scale(){return Math.min(width()/Math.max(1,bounds[2]-bounds[0]),height()/Math.max(1,bounds[3]-bounds[1]))*zoom;}
+function screen(x,y){const s=scale();return [(x-centerX)*s+width()/2+panX,(y-centerY)*s+height()/2+panY];}
+function schedule(){dirty=true;if(request===null)request=requestAnimationFrame(frame);}
+function visible(p){
+ if(!p||!Number.isFinite(p[1])||!Number.isFinite(p[2]))return false;
+ if(DATA.map&&DATA.map.lowerMaxZ!==null){
+  if(!Number.isFinite(p[3]))return false;
+  return $("floor").value==="lower" ? p[3]>=-10000&&p[3]<DATA.map.lowerMaxZ : p[3]>=DATA.map.lowerMaxZ&&p[3]<10000;
+ }
+ return true;
+}
+function atOrBefore(samples,t){let lo=0,hi=samples.length;while(lo<hi){const mid=(lo+hi)>>1;if(samples[mid][0]<=t)lo=mid+1;else hi=mid;}return lo-1;}
+function markerAt(samples,t){
+ const i=atOrBefore(samples,t);if(i<0)return null;
+ const a=samples[i];if(t-a[0]>DATA.tickStep||!visible(a)||($("alive").checked&&a[4]!==true))return null;
+ let x=a[1],y=a[2],interpolated=false;const b=samples[i+1];
+ if($("smooth").checked&&a[4]===true&&b&&b[4]===true&&b[6]===a[6]&&visible(b)&&b[0]>a[0]&&b[0]-a[0]<=DATA.tickStep){
+  const fraction=(t-a[0])/(b[0]-a[0]);if(fraction>0&&fraction<1){x+=(b[1]-x)*fraction;y+=(b[2]-y)*fraction;interpolated=true;}
+ }
+ return {x,y,sample:a,interpolated};
+}
+function retentionTicks(id){const value=$(id).value;return value==="all"?Infinity:Number(value)*Math.max(1,Number($("tickRate").value)||64);}
+function drawTrail(samples,t,context=ctx,from=0){
+ let pen=false,lastTick=null,lastStyle=null;
+ function flush(){if(!pen||!lastStyle)return;context.lineWidth=2.2;context.strokeStyle=lastStyle.color;context.setLineDash(lastStyle.dash);context.globalAlpha=selectedRounds.size>1?.5:.85;context.stroke();context.globalAlpha=1;}
+ for(const p of samples){
+  if(p[0]>t)break;
+  if(p[0]<Math.max(0,from)||!visible(p)||p[4]!==true){flush();pen=false;lastTick=p[0];continue;}
+  const style=strokeStyleFor(p),[x,y]=screen(p[1],p[2]);
+  if(pen&&(style.color!==lastStyle.color||String(style.dash)!==String(lastStyle.dash))){flush();pen=false;}
+  if(!pen){context.beginPath();context.moveTo(x,y);}else if(lastTick===null||p[0]-lastTick>DATA.tickStep)context.moveTo(x,y);else context.lineTo(x,y);
+  pen=true;lastTick=p[0];lastStyle=style;
+ }
+ flush();context.setLineDash([]);
+}
+function drawAllTrails(){
+ if(!$("trails").checked)return;
+ const tracks=[],window=retentionTicks("trailRetention"),from=Math.max(0,time-window);
+ for(const round of DATA.rounds){if(!selectedRounds.has(round.id))continue;for(const track of round.tracks){if(selectedPlayers.has(track.player))tracks.push({track,t:Math.min(time,round.duration)});}}
+ const key=[width(),height(),canvas.width,canvas.height,zoom,panX,panY,$("floor").value,[...selectedRounds].join(","),[...selectedPlayers].join(","),window,...tracks.flatMap(item=>[atOrBefore(item.track.samples,item.t),atOrBefore(item.track.samples,from-1e-7)])].join("|");
+ if(key!==trailCacheKey){
+  if(trailCanvas.width!==canvas.width||trailCanvas.height!==canvas.height){trailCanvas.width=canvas.width;trailCanvas.height=canvas.height;}
+  trailCtx.setTransform(canvas.width/width(),0,0,canvas.height/height(),0,0);trailCtx.clearRect(0,0,width(),height());
+  for(const item of tracks)drawTrail(item.track.samples,item.t,trailCtx,from);
+  trailCacheKey=key;
+ }
+ ctx.drawImage(trailCanvas,0,0,width(),height());
+ // Only the short interpolated tail changes between observed sample ticks.
+ for(const round of DATA.rounds){
+  if(!selectedRounds.has(round.id)||time>round.duration)continue;
+  for(const track of round.tracks){
+   if(!selectedPlayers.has(track.player))continue;const marker=markerAt(track.samples,time);
+   if(!marker||!marker.interpolated||marker.sample[0]<0)continue;
+   const [x0,y0]=screen(marker.sample[1],marker.sample[2]),[x1,y1]=screen(marker.x,marker.y),style=strokeStyleFor(marker.sample);
+   ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.strokeStyle=style.color;ctx.setLineDash(style.dash);ctx.lineWidth=2.2;ctx.globalAlpha=selectedRounds.size>1?.5:.85;ctx.stroke();ctx.globalAlpha=1;ctx.setLineDash([]);
+  }
+ }
+}
+const UTILITY_TYPES={smoke:{label:"S - 烟雾",color:"#b2cad6",symbol:"S"},flash:{label:"F - 闪光",color:"#ffe680",symbol:"F"},he:{label:"G - 手雷",color:"#f28375",symbol:"G"},fire:{label:"M - 火",color:"#ff9a45",symbol:"M"},decoy:{label:"诱饵",color:"#b69af5",symbol:"诱"}};
+const selectedUtilityTypes=new Set(INITIAL.utilityTypes||Object.keys(UTILITY_TYPES));
+let utilityListKey="";
+for(const [kind,spec] of Object.entries(UTILITY_TYPES)){
+ const label=document.createElement("label"),check=document.createElement("input");check.type="checkbox";check.checked=selectedUtilityTypes.has(kind);check.dataset.utilityType=kind;
+ check.onchange=()=>{if(check.checked)selectedUtilityTypes.add(kind);else selectedUtilityTypes.delete(kind);schedule();};
+ label.style.color=spec.color;label.append(check,document.createTextNode(spec.label));$("utilityTypes").append(label);
+}
+const UTILITY_CIRCLE_SECONDS={he:3,flash:3,smoke:15,fire:5};
+function utilityCircleEnd(item){return item.effectTick===null?null:item.effectTick+(UTILITY_CIRCLE_SECONDS[item.kind]||0)*Math.max(1,Number($("tickRate").value)||64);}
+function utilityVisible(point){return point&&visible([0,...point]);}
+function utilityDescription(item,round){
+ const p=item.point,raw=p?(DATA.map?[p[0]*DATA.map.scale+DATA.map.posX,DATA.map.posY-p[1]*DATA.map.scale,p[2]]:[p[0],-p[1],p[2]]):null;
+ const position=raw?raw.map(v=>Number.isFinite(v)?v.toFixed(0):"未知").join(" / "):"坐标缺失";
+ return "R"+round.id+" · "+UTILITY_TYPES[item.kind].label+" · "+(names.get(item.player)||item.name||"投掷者未知")+" · Tick "+(item.effectTick??item.samples.at(-1)?.[0]??item.start)+" · "+(item.confirmed?"爆开位置":"最后观测（未确认落点）")+" XYZ "+position;
+}
+function utilityEntries(){
+ const entries=[];
+ for(const round of DATA.rounds){
+  if(!selectedRounds.has(round.id))continue;
+  for(const item of round.utilities||[]){
+   if(!selectedUtilityTypes.has(item.kind))continue;
+   if($("utilityFollow").checked&&item.player&&names.has(item.player)&&!selectedPlayers.has(item.player))continue;
+   if(item.point&&!utilityVisible(item.point)&&!item.samples.some(p=>utilityVisible(p.slice(1))))continue;
+   entries.push({item,round});
+  }
+ }
+ return entries;
+}
+function drawUtilities(){
+ utilityMarkers=[];
+ const entries=utilityEntries();
+ const listKey=[...selectedRounds,...selectedPlayers,...selectedUtilityTypes,$("floor").value,$("utilityFollow").checked,$("showUtility").checked].join("|");
+ if(listKey!==utilityListKey){
+  utilityListKey=listKey;$("utilityList").replaceChildren();
+  if(!entries.length)$("utilityList").textContent="当前筛选下没有道具观测。";
+  for(const {item,round} of entries){
+   const button=document.createElement("button");button.textContent=utilityDescription(item,round);button.title="跳转至该道具爆开或最后观测时刻";
+   button.onclick=()=>{setPlaying(false);seek(item.effectTick??item.samples.at(-1)?.[0]??item.start);};$("utilityList").append(button);
+  }
+ }
+ if(!$("showUtility").checked){canvas.dataset.visibleUtilities="0";canvas.dataset.activeUtilityRanges="0";canvas.dataset.visibleUtilityTrails="0";return;}
+ const overview=$("utilityMode").value==="overview",window=retentionTicks("utilityRetention");
+ let visibleTrails=0;
+ for(const {item,round} of entries){
+  const spec=UTILITY_TYPES[item.kind],t=overview?round.duration:time;
+  const ended=utilityCircleEnd(item)??(item.samples.at(-1)?.[0]??item.start);
+  if(!overview&&(time<item.start||time>=ended+window))continue;
+  const samples=item.samples.filter(p=>p[0]<=t);
+  // Keep the flight together with its effect; clear all graphics after its retention ends.
+  ctx.strokeStyle=spec.color;ctx.lineWidth=1.8;ctx.setLineDash([4,4]);ctx.globalAlpha=.8;
+  ctx.beginPath();let previous=null,segments=0;
+  for(const p of samples){
+   if(!utilityVisible(p.slice(1))){previous=null;continue;}
+   const [x,y]=screen(p[1],p[2]);if(previous&&p[0]-previous[0]===1){ctx.lineTo(x,y);segments++;}else ctx.moveTo(x,y);previous=p;
+  }
+  ctx.stroke();ctx.setLineDash([]);ctx.globalAlpha=1;
+  if(segments)visibleTrails++;
+  const detonated=item.effectTick!==null&&t>=item.effectTick;
+  let point=detonated?item.point:samples.at(-1)?.slice(1);
+  if(!overview&&!detonated&&samples.length&&t-samples.at(-1)[0]>2&&
+     (item.confirmed||t<item.samples.at(-1)[0]))point=null;
+  if(!utilityVisible(point))continue;
+  const [x,y]=screen(point[0],point[1]);
+  const active=detonated&&(overview||t<utilityCircleEnd(item));
+  if(active&&item.radius>0&&$("utilityRanges").checked){
+   ctx.beginPath();ctx.arc(x,y,item.radius*scale(),0,Math.PI*2);ctx.fillStyle=spec.color;ctx.globalAlpha=.14;ctx.fill();ctx.globalAlpha=.7;ctx.strokeStyle=spec.color;ctx.setLineDash([5,4]);ctx.stroke();ctx.setLineDash([]);ctx.globalAlpha=1;
+  }
+  ctx.beginPath();ctx.arc(x,y,detonated?8:5,0,Math.PI*2);ctx.fillStyle=spec.color;ctx.fill();ctx.strokeStyle="#101510";ctx.lineWidth=1;ctx.stroke();
+  ctx.font="bold 10px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillStyle="#101510";ctx.fillText(spec.symbol,x,y);ctx.textBaseline="alphabetic";
+  if(!item.confirmed&&(overview||t>=item.samples.at(-1)?.[0])){ctx.fillStyle=spec.color;ctx.fillText("?",x+12,y);}
+  utilityMarkers.push({x,y,item,round,active});
+ }
+ canvas.dataset.visibleUtilityTrails=String(visibleTrails);
+ canvas.dataset.visibleUtilities=String(utilityMarkers.length);
+ canvas.dataset.activeUtilityRanges=String(utilityMarkers.filter(m=>m.active&&m.item.radius>0&&$("utilityRanges").checked).length);
+}
+function draw(){
+ if(width()<=0||height()<=0)return;
+ const w=width(),h=height();ctx.clearRect(0,0,w,h);ctx.fillStyle="#101510";ctx.fillRect(0,0,w,h);
+ const image=images[$("floor").value]||images.upper;
+ if(image&&image.complete&&image.naturalWidth){const [x,y]=screen(0,0);ctx.drawImage(image,x,y,1024*scale(),1024*scale());}
+ drawAllTrails();
+ drawUtilities();
+ markers=[];let statuses=[];
+ DATA.rounds.forEach((round,index)=>{
+  if(!selectedRounds.has(round.id))return;
+  let count=0;
+  for(const track of round.tracks){
+   if(!selectedPlayers.has(track.player))continue;
+   if(time>round.duration)continue;
+   const marker=markerAt(track.samples,time);if(!marker)continue;
+   const [x,y]=screen(marker.x,marker.y);if(x<0||x>w||y<0||y>h)continue;
+   const p=marker.sample;ctx.globalAlpha=p[4]===true?1:.45;
+   ctx.beginPath();ctx.arc(x,y,6.5,0,Math.PI*2);ctx.fillStyle=slotColor(p[7]);ctx.fill();
+   ctx.setLineDash(p[6]===2?[3,2]:[]);ctx.strokeStyle="#e4edf5";ctx.lineWidth=1.5;ctx.stroke();ctx.setLineDash([]);
+   ctx.font="bold 9px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillStyle="#0d1420";ctx.fillText(Number.isInteger(p[7])?String(p[7]):"?",x,y);ctx.textBaseline="alphabetic";
+   if(p[4]!==true){ctx.beginPath();ctx.moveTo(x-4,y-4);ctx.lineTo(x+4,y+4);ctx.moveTo(x+4,y-4);ctx.lineTo(x-4,y+4);ctx.strokeStyle="white";ctx.lineWidth=1.5;ctx.stroke();}
+   if($("names").checked||selectedPlayers.size===1){ctx.font="12px system-ui";ctx.textAlign="center";ctx.lineWidth=3;ctx.strokeStyle="#101510";ctx.fillStyle="#f4f7fb";const label=names.get(track.player)+(selectedRounds.size>1?" · R"+round.id:"");ctx.strokeText(label,x,y-12);ctx.fillText(label,x,y-12);}
+   ctx.globalAlpha=1;markers.push({...marker,x,y,player:track.player,round:round.id,anchor:round.anchor});count++;
+  }
+  statuses.push("R"+round.id+": "+(time>round.duration?"已结束":count+" 名可见玩家")+(round.fallback?"（起点回退）":""));
+ });
+ $("time").textContent="进度 "+(DATA.maxTick?Math.round(time/DATA.maxTick*100):0)+"% · Tick "+Math.floor(time);$("timeline").value=String(Math.floor(time));
+ $("roundStatus").textContent=statuses.join("　|　");canvas.dataset.renderTick=String(Math.floor(time));canvas.dataset.visibleMarkers=String(markers.length);canvas.dataset.drawCount=String(++drawCount);
+}
+function frame(now){
+ request=null;
+ if(playing){
+  if(previousFrame!==null)time+=Math.min((now-previousFrame)/1000,.25)*Math.max(1,Number($("tickRate").value)||64)*Number($("speed").value);
+  if(time>=DATA.maxTick){if($("loop").checked&&DATA.maxTick>0)time%=DATA.maxTick;else {time=DATA.maxTick;playing=false;updatePlay();}}
+  dirty=true;
+ }
+ previousFrame=playing?now:null;if(dirty){draw();dirty=false;}if(playing)request=requestAnimationFrame(frame);
+}
+function updatePlay(){$("play").textContent=playing?"⏸ 暂停":"▶ 播放";$("play").setAttribute("aria-pressed",String(playing));}
+function setPlaying(value){playing=value&&DATA.maxTick>0;if(playing&&time>=DATA.maxTick)time=0;previousFrame=null;updatePlay();schedule();}
+function seek(value){time=Math.max(0,Math.min(DATA.maxTick,Number(value)||0));schedule();}
+$("play").onclick=()=>setPlaying(!playing);
+$("restart").onclick=()=>{setPlaying(false);seek(0);};
+$("previous").onclick=()=>{setPlaying(false);seek(time-DATA.tickStep);};
+$("next").onclick=()=>{setPlaying(false);seek(time+DATA.tickStep);};
+$("timeline").max=String(DATA.maxTick);$("duration").textContent="最长回合 "+DATA.maxTick+" Tick";
+$("timeline").addEventListener("input",event=>seek(event.target.value));
+$("timeline").addEventListener("pointerdown",()=>{resumeAfterSeek=playing;setPlaying(false);});
+$("timeline").addEventListener("pointerup",()=>{if(resumeAfterSeek)setPlaying(true);resumeAfterSeek=false;});
+for(const id of ["floor","trails","names","alive","smooth","speed","tickRate","showUtility","utilityMode","utilityRanges","utilityFollow","trailRetention","utilityRetention"])$(id).addEventListener("change",schedule);
+$("floor").value=INITIAL.floor||"upper";
+$("utilityMode").value=INITIAL.utilityMode||"current";
+$("trailRetention").value=INITIAL.trailRetention||"10";
+$("utilityRetention").value=INITIAL.utilityRetention||"10";
+$("tickRate").value=INITIAL.tickRate||"64";
+for(const id of ["showUtility","utilityFollow","utilityRanges"])if(INITIAL[id]!==undefined)$(id).checked=INITIAL[id];
+$("names").checked=false;
+$("roundPanel").open=DATA.rounds.length<=4;
+$("floorControl").hidden=!(DATA.map&&DATA.map.lowerMaxZ!==null);
+DATA.rounds.forEach((round,index)=>{
+ const label=document.createElement("label");label.className="round";label.style.borderColor="#72879e";
+ const check=document.createElement("input");check.type="checkbox";check.checked=selectedRounds.has(round.id);check.dataset.round=String(round.id);
+ check.onchange=()=>{if(check.checked)selectedRounds.add(round.id);else selectedRounds.delete(round.id);schedule();};
+ label.title=(round.teamAName||"队伍 A")+" "+(round.teamASide===2?"T":round.teamASide===3?"CT":"未知阵营")+" · "+(round.isOvertime===null?"阶段未知":round.isOvertime?"加时":"常规");
+ label.append(check,document.createTextNode("R"+round.id+(round.isOvertime?" · 加时":"")+(round.fallback?" · 起点回退":"")));$("rounds").append(label);
+});
+function syncPlayers(){for(const check of $("players").querySelectorAll("input"))check.checked=selectedPlayers.has(check.dataset.player);schedule();}
+const teamGroups=new Map();
+for(const player of DATA.players){
+ const key=player.team||"unknown";
+ if(!teamGroups.has(key)){
+  const section=document.createElement("section");section.className="team-group";section.dataset.team=key;
+  const header=document.createElement("div");header.className="team-title";
+  const title=document.createElement("strong");title.textContent=player.teamName||"战队未知";
+  const button=document.createElement("button");button.textContent=title.textContent+"全队";button.dataset.teamSelect=key;
+  button.onclick=()=>{selectedPlayers.clear();DATA.players.filter(p=>(p.team||"unknown")===key).forEach(p=>selectedPlayers.add(p.id));syncPlayers();};
+  header.append(title,button);const roster=document.createElement("div");roster.className="team-roster";
+  section.append(header,roster);$("players").append(section);teamGroups.set(key,roster);
+ }
+}
+DATA.players.forEach(player=>{
+ const tile=document.createElement("div");tile.className="player";tile.dataset.name=(player.name+" "+(player.teamName||"")).toLowerCase();
+ const label=document.createElement("label"),check=document.createElement("input"),name=document.createElement("span");
+ check.type="checkbox";check.checked=selectedPlayers.has(player.id);check.dataset.player=player.id;check.setAttribute("aria-label",player.name+" "+player.id);
+ check.onchange=()=>{if(check.checked)selectedPlayers.add(player.id);else selectedPlayers.delete(player.id);schedule();};
+ const badge=document.createElement("span");badge.className="slot";badge.style.background=slotColor(player.color);badge.textContent=Number.isInteger(player.color)?String(player.color):"?";tile.append(badge);
+ name.textContent=player.name;name.title=player.name+" · "+player.id;label.append(check,name);
+ const solo=document.createElement("button");solo.textContent="单看";solo.dataset.solo=player.id;solo.setAttribute("aria-label","单看 "+player.name);solo.onclick=()=>{selectedPlayers.clear();selectedPlayers.add(player.id);syncPlayers();};
+ tile.append(label,solo);teamGroups.get(player.team||"unknown").append(tile);
+});
+$("allPlayers").onclick=()=>{DATA.players.forEach(p=>selectedPlayers.add(p.id));syncPlayers();};
+$("noPlayers").onclick=()=>{selectedPlayers.clear();syncPlayers();};
+$("playerSearch").oninput=()=>{const query=$("playerSearch").value.toLowerCase();for(const tile of $("players").querySelectorAll(".player"))tile.hidden=!tile.dataset.name.includes(query);for(const group of $("players").children)group.hidden=![...group.querySelectorAll(".player")].some(p=>!p.hidden);};
+$("resetView").onclick=()=>{zoom=1;panX=panY=0;schedule();};
+$("mapSize").onchange=()=>{canvas.style.height=$("mapSize").value+"px";schedule();};
+async function toggleFullscreen(){
+ try{if(document.fullscreenElement){await document.exitFullscreen();}else{await $("app").requestFullscreen();}}
+ catch(error){$("viewerMessage").textContent="浏览器限制了嵌入式全屏。请点击“独立窗口”，再在新窗口点击全屏。";}
+}
+$("fullscreen").onclick=toggleFullscreen;
+function fullscreenChanged(){$("fullscreen").textContent=document.fullscreenElement?"退出全屏（Esc）":"⛶ 全屏播放";schedule();}
+document.addEventListener("fullscreenchange",fullscreenChanged);
+$("openWindow").onclick=()=>{
+ const copy=JSON.parse(JSON.stringify(DATA));copy.initialState={time,players:[...selectedPlayers],rounds:[...selectedRounds],floor:$("floor").value,utilityTypes:[...selectedUtilityTypes],utilityMode:$("utilityMode").value,showUtility:$("showUtility").checked,utilityFollow:$("utilityFollow").checked,utilityRanges:$("utilityRanges").checked,trailRetention:$("trailRetention").value,utilityRetention:$("utilityRetention").value,tickRate:$("tickRate").value};
+ const doc=new DOMParser().parseFromString(ORIGINAL_HTML,"text/html");
+ doc.getElementById("payload").textContent=JSON.stringify(copy).replace(/</g,"\\u003c").replace(/>/g,"\\u003e").replace(/&/g,"\\u0026");
+ const url=URL.createObjectURL(new Blob(["<!doctype html>"+doc.documentElement.outerHTML],{type:"text/html"}));
+ window.open(url,"_blank","noopener");setTimeout(()=>URL.revokeObjectURL(url),60000);
+};
+canvas.addEventListener("wheel",event=>{
+ event.preventDefault();const rect=canvas.getBoundingClientRect(),mx=event.clientX-rect.left,my=event.clientY-rect.top;
+ const oldScale=scale(),wx=(mx-width()/2-panX)/oldScale+centerX,wy=(my-height()/2-panY)/oldScale+centerY;
+ zoom=Math.max(.5,Math.min(12,zoom*Math.exp(-event.deltaY*.001)));const [newX,newY]=screen(wx,wy);panX+=mx-newX;panY+=my-newY;schedule();
+},{passive:false});
+canvas.addEventListener("pointerdown",event=>{drag={x:event.clientX,y:event.clientY,panX,panY};canvas.setPointerCapture(event.pointerId);$("tooltip").style.display="none";});
+canvas.addEventListener("pointerup",()=>{drag=null;});canvas.addEventListener("pointercancel",()=>{drag=null;});
+canvas.addEventListener("pointermove",event=>{
+ if(drag){panX=drag.panX+event.clientX-drag.x;panY=drag.panY+event.clientY-drag.y;schedule();return;}
+ const rect=canvas.getBoundingClientRect(),x=event.clientX-rect.left,y=event.clientY-rect.top;
+ const marker=markers.find(p=>Math.hypot(p.x-x,p.y-y)<12),tooltip=$("tooltip");
+ if(!marker){
+  const utility=utilityMarkers.find(p=>Math.hypot(p.x-x,p.y-y)<14);
+  if(!utility){tooltip.style.display="none";return;}
+  tooltip.textContent=utilityDescription(utility.item,utility.round)+(utility.active?"\n范围为估算示意":"");
+  tooltip.style.left=Math.max(0,Math.min(width()-220,x+14))+"px";tooltip.style.top=Math.max(0,y-80)+"px";tooltip.style.display="block";return;
+ }
+ const p=marker.sample,rawX=DATA.map?p[1]*DATA.map.scale+DATA.map.posX:p[1],rawY=DATA.map?DATA.map.posY-p[2]*DATA.map.scale:-p[2];
+ tooltip.textContent=names.get(marker.player)+" · R"+marker.round+" · "+(p[6]===2?"T":p[6]===3?"CT":"未知阵营")+" · 编号 "+(p[7]??"未知")+"\n观测 Tick "+(marker.anchor+p[0])+" · HP "+(p[5]??"未知")+"\nX "+rawX.toFixed(1)+" / Y "+rawY.toFixed(1)+" / Z "+(p[3]??"未知")+(marker.interpolated?"\n位置经过显示插值":"");
+ tooltip.style.left=Math.max(0,Math.min(width()-220,x+14))+"px";tooltip.style.top=Math.max(0,y-80)+"px";tooltip.style.display="block";
+});
+canvas.addEventListener("pointerleave",()=>{$("tooltip").style.display="none";});
+document.addEventListener("keydown",event=>{if(event.code==="Escape"&&document.fullscreenElement){document.exitFullscreen().catch(()=>{});return;}if(event.code==="Space"&&!['INPUT','SELECT','BUTTON'].includes(event.target.tagName)){event.preventDefault();setPlaying(!playing);}});
+function resize(){if(width()<=0||height()<=0)return;const ratio=window.devicePixelRatio||1;canvas.width=Math.round(width()*ratio);canvas.height=Math.round(height()*ratio);ctx.setTransform(ratio,0,0,ratio,0,0);schedule();}
+new ResizeObserver(resize).observe(canvas);
+for(const [layer,source] of Object.entries(DATA.images)){const image=new Image();image.onload=schedule;image.src=source;images[layer]=image;}
+resize();updatePlay();
+</script></body></html>
