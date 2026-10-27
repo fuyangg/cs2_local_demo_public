@@ -8,6 +8,7 @@
 
 ```bash
 bash scripts/setup-dev.sh
+uv run --locked cs2ta --download-maps
 bash scripts/run-dev.sh
 ```
 
@@ -145,7 +146,18 @@ cd cs2_local_demo
 bash scripts/setup-wsl.sh
 ```
 
-安装脚本执行 `uv sync --locked`，由 uv 准备 Python、建立项目 `.venv`、按 `uv.lock` 安装依赖，然后用 `uv run --locked pytest -q` 运行测试。无需激活虚拟环境或执行 pip。原版的 `.venv` 可以由 uv 继续同步；不必删除本地 Demo 或缓存。启动后，在 Windows 浏览器打开：
+安装脚本执行 `uv sync --locked`，由 uv 准备 Python、建立项目 `.venv`、按 `uv.lock` 安装依赖，然后用 `uv run --locked pytest -q` 运行测试。无需激活虚拟环境或执行 pip。原版的 `.venv` 可以由 uv 继续同步；不必删除本地 Demo 或缓存。
+
+安装完成后，在同一项目目录下载地图底图，再启动应用：
+
+```bash
+uv run --locked cs2ta --download-maps
+bash scripts/run-dev.sh
+```
+
+地图资源约 2.9 MB，包含 Dust2、Mirage、Nuke 上层和下层。dev 默认保存到 `.cache/maps/dev/2000935/`，不放在 Demo 目录中；已有完整缓存时会直接复用。下载成功会输出四张 PNG 的完整路径，也可执行 `ls -lh .cache/maps/dev/2000935/` 检查。更多地图来源、手动下载与自定义缓存说明见 [地图资源说明](docs/MAP_ASSETS.md)。如果应用已启动，先按 `Ctrl+C` 停止，再运行下载命令并重新启动。
+
+启动后，在 Windows 浏览器打开：
 
 ```text
 http://localhost:8501
