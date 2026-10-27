@@ -26,9 +26,14 @@ def build_rounds(events: pl.DataFrame) -> pl.DataFrame:
         end = candidates.row(0, named=True)
         freeze = freezes.filter(pl.col("tick").is_between(start["tick"], end["tick"]))
         warmup = start.get("is_warmup_period")
+        # Parser versions/demos can report either side names or numeric codes.
+        winner = end.get("winner")
+        if isinstance(winner, str):
+            winner = winner.strip().upper()
+        winner = {2: 2, 3: 3, "2": 2, "3": 3, "T": 2, "CT": 3}.get(winner)
         rows.append({"round_id": len(rows) + 1, "start_tick": int(start["tick"]),
                      "freeze_end_tick": int(freeze["tick"][0]) if not freeze.is_empty() else None,
-                     "end_tick": int(end["tick"]), "winner": end.get("winner"),
+                     "end_tick": int(end["tick"]), "winner": winner,
                      "warmup": bool(warmup) if not missing(warmup) else None})
     return pl.DataFrame(rows, schema=ROUND_SCHEMA, strict=False)
 
