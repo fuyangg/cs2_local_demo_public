@@ -43,11 +43,17 @@ class Radar:
 
 
 RADARS = {
+    "de_ancient": Radar("de_ancient", -2953.0, 2164.0, 5.0),
+    "de_anubis": Radar("de_anubis", -2796.0, 3328.0, 5.22),
+    "de_cache": Radar("de_cache", -2000.0, 3250.0, 5.5),
     "de_dust2": Radar("de_dust2", -2476.0, 3239.0, 4.4),
-    "de_nuke": Radar("de_nuke", -3453.0, 2887.0, 7.0, lower_max_z=-495.0),
+    "de_inferno": Radar("de_inferno", -2087.0, 3870.0, 4.9),
     "de_mirage": Radar("de_mirage", -3230.0, 1713.0, 5.0),
+    "de_nuke": Radar("de_nuke", -3453.0, 2887.0, 7.0, lower_max_z=-495.0),
 }
-IMAGE_NAMES = ["de_dust2.png", "de_nuke.png", "de_nuke_lower.png", "de_mirage.png"]
+IMAGE_NAMES = [name for radar in RADARS.values()
+               for name in ([f"{radar.name}.png", f"{radar.name}_lower.png"]
+                            if radar.lower_max_z is not None else [f"{radar.name}.png"])]
 
 
 def radar_path(radar: Radar, layer: str = "upper", cache_root: Path | None = None) -> Path:

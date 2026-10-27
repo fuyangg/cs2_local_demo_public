@@ -27,6 +27,8 @@ jobs:
           enable-cache: true
       - run: uv sync --locked --group browser
       - run: uv run --locked --group browser playwright install --with-deps chromium
+      - name: Prepare active-duty radar images
+        run: uv run --locked cs2ta --download-maps
       - name: Prepare optional public demo
         id: demo
         if: github.event_name == 'workflow_dispatch' && inputs.public_demo
@@ -34,7 +36,7 @@ jobs:
       - name: Run tests and capture visual evidence
         env:
           CS2TA_VISUAL_DATASET: ${{ steps.demo.outputs.dataset }}
-          CS2TA_VISUAL_MAP_CACHE: ${{ steps.demo.outputs.map_cache }}
+          CS2TA_VISUAL_MAP_CACHE: ${{ steps.demo.outputs.map_cache || '.cache/maps/dev' }}
         run: uv run --locked --group browser pytest -q --visual-artifacts artifacts/browser
       - uses: actions/upload-artifact@v4
         if: always()

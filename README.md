@@ -27,7 +27,7 @@ bash scripts/run-dev.sh
 - 同时叠加 1–20 个回合，按回合开始或冻结结束对齐，支持单人/多人筛选。
 - 按游戏人物编号使用黄/紫/绿/蓝/橙配色，CT 实线、T 虚线；支持地图大小与全屏播放。
 - 按队伍、T/CT 阵营和常规/加时筛选，通过回合勾选表快速多选。
-- 自动按 Demo 地图选择 Dust2、Nuke 或 Mirage 雷达底图，将世界坐标投影到地图；Nuke 支持上下层切换。
+- 自动按 Demo 地图选择 Ancient、Anubis、Cache、Dust2、Inferno、Mirage 或 Nuke 雷达底图，将世界坐标投影到地图；Nuke 支持上下层切换。
 - 用 Demo SHA-256、解析器版本及 Schema 版本缓存结果到本地 Parquet。
 
 **范围说明：** 当前是数据与可视化闭环，尚未实现地图语义区域、开局阵型分类、道具影响面积、战术标签或官方计分板。地图投影使用配套 overview 坐标参数；旧 Demo 与所用底图版本可能存在细节差异。回合编号是录制顺序，可能包含刀局和重启。缺少起止事件的不完整回合不进入索引；不假设 64 Tick/s。
@@ -155,7 +155,7 @@ uv run --locked cs2ta --download-maps
 bash scripts/run-dev.sh
 ```
 
-地图资源约 2.9 MB，包含 Dust2、Mirage、Nuke 上层和下层。dev 默认保存到 `.cache/maps/dev/2000935/`，不放在 Demo 目录中；已有完整缓存时会直接复用。下载成功会输出四张 PNG 的完整路径，也可执行 `ls -lh .cache/maps/dev/2000935/` 检查。更多地图来源、手动下载与自定义缓存说明见 [地图资源说明](docs/MAP_ASSETS.md)。如果应用已启动，先按 `Ctrl+C` 停止，再运行下载命令并重新启动。
+地图资源约 2.9 MB，一次下载七张服役地图 Ancient、Anubis、Cache、Dust2、Inferno、Mirage、Nuke，共八张 PNG（Nuke 含上层和下层）。dev 默认保存到 `.cache/maps/dev/2000935/`，不放在 Demo 目录中；已有完整缓存时会直接复用，旧版只有四张底图时重新执行同一命令即可补齐。下载成功会输出八张 PNG 的完整路径，也可执行 `ls -lh .cache/maps/dev/2000935/` 检查。地图池按 2026-10-27 核对，来源及手动下载说明见 [地图资源说明](docs/MAP_ASSETS.md)。如果应用已启动，先按 `Ctrl+C` 停止，再运行下载命令并重新启动。
 
 启动后，在 Windows 浏览器打开：
 

@@ -7,7 +7,7 @@
 - 坐标来源：该发布的 `map_data.json`，固定版本，不自动追随最新地图。
 - 图片来源：该发布的 `images.zip`（2,876,805 字节）。
 - 图片压缩包 SHA-256：`217dec0b1f2203cc7e9f7bb1b9ef13873665f093203a7df7231b9eb0074b649e`，与上游 `manifest.json` 一致。
-- 只读取 Dust2、Nuke 上层/下层和 Mirage 的指定 PNG；不解包任意路径。
+- 一次准备七张服役地图 Ancient、Anubis、Cache、Dust2、Inferno、Mirage、Nuke，共八张 PNG（Nuke 有上下层）；只读取明确列出的 PNG，不解包任意路径。
 - 缓存目录：由当前环境配置决定，dev 为 `.cache/maps/dev/2000935/`，prod 为 `.cache/maps/prod/2000935/`，均已被 Git 忽略。
 
 下载入口：
@@ -16,15 +16,23 @@
 uv run --locked cs2ta --download-maps
 ```
 
+服役池按 2026-10-27 核对：[Valve 的 Season 5 公告](https://store.steampowered.com/news/posts/?appids=730&enddate=1783551090)确认 Cache 替换 Overpass；[Season 4 更新](https://store.steampowered.com/news/posts/?appids=730&enddate=1769036296&feed=steam_community_announcements)确认 Anubis 替换 Train。此下载器准备的是上述七张地图的二维雷达底图，不下载游戏服务器文件；未来地图池变化时需要更新支持列表与配套坐标。
+
+旧版本仅下载四张底图的用户，更新代码后重新执行同一命令即可补齐。已有同版本底图内容保持一致，不需要删除缓存；八张图片齐全后再次执行不会联网。成功输出八个 PNG 路径。
+
 也可以在页面点击“下载地图底图”。首次需要访问 GitHub Releases；下载失败保留世界坐标视图，不影响 Demo 数据。
 
 无法由脚本联网下载时，可以用浏览器下载同一发布的 `images.zip`，将其中以下文件放入缓存目录：
 
 ```text
+.cache/maps/dev/2000935/de_ancient.png
+.cache/maps/dev/2000935/de_anubis.png
+.cache/maps/dev/2000935/de_cache.png
 .cache/maps/dev/2000935/de_dust2.png
+.cache/maps/dev/2000935/de_inferno.png
+.cache/maps/dev/2000935/de_mirage.png
 .cache/maps/dev/2000935/de_nuke.png
 .cache/maps/dev/2000935/de_nuke_lower.png
-.cache/maps/dev/2000935/de_mirage.png
 ```
 
 以上为 dev 示例，prod 应放在其独立工作树的 `.cache/maps/prod/2000935/`。
@@ -42,9 +50,13 @@ pixel_y = (pos_y - world_y) / scale
 
 | 地图 | pos_x | pos_y | scale |
 |---|---:|---:|---:|
+| Ancient | -2953 | 2164 | 5.0 |
+| Anubis | -2796 | 3328 | 5.22 |
+| Cache | -2000 | 3250 | 5.5 |
 | Dust2 | -2476 | 3239 | 4.4 |
-| Nuke | -3453 | 2887 | 7.0 |
+| Inferno | -2087 | 3870 | 4.9 |
 | Mirage | -3230 | 1713 | 5.0 |
+| Nuke | -3453 | 2887 | 7.0 |
 
 这里使用完整静态雷达 PNG 的 overview 投影，保持图片与轨迹同比缩放。游戏内雷达的动态旋转、缩放不应用到此静态视图。Plotly Y 轴固定为 `[1024, 0]`，保持图片方向，拖动 Tick 时底图范围不漂移。原始 Parquet 坐标不修改；悬停显示原始 X/Y/Z。
 

@@ -140,7 +140,8 @@ with round_tab:
             else:
                 radar = None
         else:
-            st.info(f"暂未配置 {map_name} 的地图资源，显示世界坐标。当前支持 Dust2、Nuke 和 Mirage。")
+            supported = "、".join(name.removeprefix("de_").title() for name in RADARS)
+            st.info(f"暂未配置 {map_name} 的地图资源，显示世界坐标。当前支持 {supported}。")
         st.caption("按原始 Tick 采样；阵营来自该时刻的 team_num。悬停可查看原始世界坐标和高度。")
         tick_step = st.select_slider("轨迹采样 Tick 间隔（越小越细）", options=[4, 8, 16, 32, 64], value=16)
         cache = position_cache_path(destination, round_id, tick_step)
