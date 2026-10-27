@@ -61,9 +61,18 @@ def test_radar_figure_embeds_image_and_reverses_y_without_changing_facts(tmp_pat
     assert_frame_equal(states, original)
 
 
-def test_download_extracts_only_expected_images_and_reuses_cache(tmp_path, monkeypatch):
+@pytest.mark.parametrize("legacy_cache", [False, True])
+def test_download_extracts_only_expected_images_and_reuses_cache(tmp_path, monkeypatch, legacy_cache):
     png = io.BytesIO()
     Image.new("RGB", (1024, 1024)).save(png, format="PNG")
+    existing = {}
+    if legacy_cache:
+        destination = tmp_path / radar.ASSET_VERSION
+        destination.mkdir()
+        for name in ["de_dust2.png", "de_mirage.png", "de_nuke.png", "de_nuke_lower.png"]:
+            path = destination / name
+            path.write_bytes(png.getvalue())
+            existing[path] = path.read_bytes()
     archive = io.BytesIO()
     with zipfile.ZipFile(archive, "w") as bundle:
         for name in radar.IMAGE_NAMES:
@@ -79,10 +88,11 @@ def test_download_extracts_only_expected_images_and_reuses_cache(tmp_path, monke
 
     monkeypatch.setattr(radar.urllib.request, "urlopen", fetch)
     paths = radar.download_radars(tmp_path)
-    assert len(paths) == 4 and all(p.is_file() for p in paths)
+    assert len(paths) == 8 and all(p.is_file() for p in paths)
     assert not (tmp_path / "unexpected-file").exists()
     assert radar.download_radars(tmp_path) == paths
     assert requests == [radar.ASSET_URL]
+    assert all(path.read_bytes() == data for path, data in existing.items())
 
 
 def test_download_rejects_wrong_checksum_without_publishing(tmp_path, monkeypatch):
@@ -90,3 +100,23 @@ def test_download_rejects_wrong_checksum_without_publishing(tmp_path, monkeypatc
     with pytest.raises(ValueError, match="SHA-256"):
         radar.download_radars(tmp_path)
     assert not list(tmp_path.rglob("*.png"))
+
+
+@pytest.mark.parametrize(("name", "origin", "scale"), [
+    ("de_ancient", (-2953., 2164.), 5.),
+    ("de_anubis", (-2796., 3328.), 5.22),
+    ("de_cache", (-2000., 3250.), 5.5),
+    ("de_inferno", (-2087., 3870.), 4.9),
+])
+def test_added_active_duty_maps_use_matching_overview_coordinates(name, origin, scale):
+    spec = radar.RADARS[name]
+    assert spec.project(*origin) == (0., 0.)
+    assert spec.project(origin[0] + 1024 * scale, origin[1] - 1024 * scale) == pytest.approx((1024., 1024.))
+    assert radar.radar_path(spec).name == f"{name}.png"
+
+
+def test_complete_active_duty_pool_and_floor_images():
+    assert set(radar.RADARS) == {
+        "de_ancient", "de_anubis", "de_cache", "de_dust2", "de_inferno", "de_mirage", "de_nuke",
+    }
+    assert set(radar.IMAGE_NAMES) == {f"{name}.png" for name in radar.RADARS} | {"de_nuke_lower.png"}
