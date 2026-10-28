@@ -57,6 +57,7 @@ cli.main()
         page.goto(address)
         expect(page.get_by_role("button", name="上传并分析", exact=True)).to_be_disabled()
         assert page.locator('input[type="file"]').get_attribute("multiple") is not None
+        assert page.locator('input[type="file"]').get_attribute("accept") in (None, "")
         assert not page.get_by_text("本地 Demo 文件路径", exact=True).count()
         transfers = []
         page.on("request", lambda request: transfers.append(request.url) if request.method == "PUT" else None)
@@ -89,6 +90,10 @@ cli.main()
         assert len(list((tmp_path / "data/dev/uploads").glob("*.dem"))) == 1
         analyze("invalid.dem", b"not a demo")
         expect(page.get_by_text("invalid.dem · 上传分析失败：文件头不是 CS2 录像。请确认已解压，且不是 CS:GO 录像。", exact=True)).to_be_visible()
+        expect(page.get_by_text("已载入：renamed.dem", exact=True)).to_be_visible()
+        # The picker is unrestricted for iOS, but the server must still reject other extensions.
+        analyze("not-a-demo.txt", b"PBDEMS2\x00valid header, wrong extension")
+        expect(page.get_by_text("not-a-demo.txt · 上传分析失败：请上传已解压的 CS2 .dem 录像。", exact=True)).to_be_visible()
         expect(page.get_by_text("已载入：renamed.dem", exact=True)).to_be_visible()
         analyze("broken.dem", b"PBDEMS2\x00broken")
         expect(page.get_by_text("broken.dem · 上传分析失败：测试录像无法解析", exact=True)).to_be_visible()

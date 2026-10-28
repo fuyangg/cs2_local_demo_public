@@ -29,6 +29,8 @@ def test_upload_is_default_and_does_not_offer_server_path_browsing():
     assert not app.selectbox
     assert not any("当前目录" in caption.value for caption in app.caption)
     assert app.get("file_uploader")[0].proto.multiple_files
+    # An extension accept hint can disable unknown .dem files in the iOS native picker.
+    assert not app.get("file_uploader")[0].proto.type
 
 
 def test_append_batches_deduplicate_and_failures_keep_all_prior_matches(tmp_path, monkeypatch):
