@@ -42,7 +42,8 @@ render_round_player(Path("''' + str(tmp_path) + '''"), "fixture.dem", rounds, 1,
 ''').run()
     assert not app.exception
     assert app.selectbox(key="replay_alignment").value == "freeze_end"
-    assert app.checkbox(key="replay_utility").value is True
+    assert app.checkbox(key="replay_utility").value is False
+    assert app.checkbox(key="replay_low_memory").value is True
 
 
 def test_economy_team_side_phase_filters_combine_and_keep_manual_selection():

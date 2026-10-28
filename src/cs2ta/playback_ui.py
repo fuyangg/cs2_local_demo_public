@@ -10,21 +10,31 @@ import streamlit.components.v1 as components
 from cs2ta import radar
 from cs2ta.frames import read_parquet
 from cs2ta.pipeline import parse_rounds_positions, position_cache_path, parse_utility_tracks
-from cs2ta.playback import playback_html, playback_payload
+from cs2ta.playback import MAX_PLAYBACK_ROWS, playback_html, playback_payload
 from cs2ta.round_picker import pick_rounds
+from cs2ta.replay_data import LIGHT_MAX_ROUNDS, LIGHT_MAX_ROWS, check_position_budget, read_round_window
 from cs2ta.comparison import comparison_payload, comparison_rounds, match_label, same_map
 
 
 def render_round_player(destination: Path, demo: str, rounds: pl.DataFrame,
                         default_round: int, map_name: str, *, matches=None) -> None:
+    low_memory = st.checkbox("省内存模式（适合 Streamlit Cloud）", value=True, key="replay_low_memory",
+        help="最多 4 个回合、20 万条位置，使用较稀采样；关闭可恢复常规精度和 20 回合上限。")
     selected = pick_rounds(rounds, destination, default_round)
+    if low_memory and len(selected) > LIGHT_MAX_ROUNDS:
+        st.warning("省内存模式最多加载 4 个回合，请减少选择；资源充足时可关闭省内存模式。")
+        return
+    max_rows = LIGHT_MAX_ROWS if low_memory else MAX_PLAYBACK_ROWS
     with st.expander("高级设置（通常保持默认即可）"):
         a, b, c = st.columns(3)
         anchor = a.selectbox("回合对齐", ["freeze_end", "round_start"],
                             format_func=lambda value: "从回合开始" if value == "round_start" else "从冻结结束",
                             key="replay_alignment")
-        quality = b.selectbox("画面精度", ["自动（推荐）", "流畅（适合多回合）", "精细"], key="replay_quality")
+        quality = b.selectbox("画面精度", ["自动（推荐）", "流畅（适合多回合）", "精细"], key="replay_quality", disabled=low_memory)
         step = (32 if len(selected) > 8 else 16) if quality == "自动（推荐）" else {"流畅（适合多回合）": 32, "精细": 4}[quality]
+        if low_memory:
+            step = max(64, step)
+            st.caption("省内存模式使用至少 64 Tick 采样，减少位置与回放数据量。")
         view = c.selectbox("地图显示", ["地图雷达", "世界坐标"], key="replay_view")
     spec = radar.RADARS.get(map_name) if view == "地图雷达" else None
     images = {}
@@ -46,16 +56,18 @@ def render_round_player(destination: Path, demo: str, rounds: pl.DataFrame,
     if not selected:
         st.info("请选择至少一个回合。")
         return
-    show_utility = st.checkbox("加载道具轨迹与落点", value=True, key="replay_utility")
+    show_utility = st.checkbox("加载道具轨迹与落点", value=False, key="replay_utility",
+        help="道具需解析整场实体观测，会增加内存；只看玩家移动时保持关闭。")
     if matches is not None:
-        _render_comparison_replay(matches, rounds, selected, step, spec, images, anchor, show_utility)
+        _render_comparison_replay(matches, rounds, selected, step, spec, images, anchor, show_utility, max_rows)
         return
     paths = {rid: position_cache_path(destination, rid, step) for rid in selected}
     if st.button(f"查看这 {len(selected)} 个回合", type="primary", key="load_replay"):
         try:
             with st.spinner(f"准备 {len(selected)} 个回合的位置，首次需解析，已有缓存会复用……"):
-                parse_rounds_positions(demo, destination, selected, step)
-                if show_utility:
+                if any(not path.is_file() for path in paths.values()):
+                    parse_rounds_positions(demo, destination, selected, step)
+                if show_utility and not (destination / "utility-tracks-v1.parquet").is_file():
                     parse_utility_tracks(demo, destination)
         except Exception as error:
             st.error(f"回放数据加载失败：{error}")
@@ -64,12 +76,14 @@ def render_round_player(destination: Path, demo: str, rounds: pl.DataFrame,
         st.info(f"回合 {missing} 尚未准备好，请点击上方加载按钮。")
         return
     try:
+        check_position_budget(paths, max_rows)
+        chosen_rounds = rounds.filter(pl.col("round_id").is_in(selected))
         states = {rid: read_parquet(path) for rid, path in paths.items()}
         utility_path = destination / "utility-tracks-v1.parquet"
-        utility = read_parquet(utility_path) if show_utility and utility_path.is_file() else None
+        utility = read_round_window(utility_path, chosen_rounds) if show_utility and utility_path.is_file() else None
         if show_utility and utility is None:
             st.info("点击上方加载按钮，解析道具飞行轨迹；当前仍可查看已有爆开事件。")
-        events = read_parquet(destination / "events.parquet") if show_utility else None
+        events = read_round_window(destination / "events.parquet", chosen_rounds) if show_utility else None
         payload = playback_payload(states, rounds, step, spec, images, anchor,
                                    utility_tracks=utility, events=events)
         if any(item["fallback"] for item in payload["rounds"]):
@@ -92,7 +106,7 @@ def render_comparison_player(matches):
     render_round_player(Path("comparison-" + key), "", rounds, int(rounds["round_id"][0]), map_name, matches=matches)
 
 
-def _render_comparison_replay(matches, rounds, selected, step, spec, images, anchor, show_utility):
+def _render_comparison_replay(matches, rounds, selected, step, spec, images, anchor, show_utility, max_rows):
     chosen = rounds.filter(pl.col("round_id").is_in(selected))
     selection = [(row["match_id"], row["source_round_id"]) for row in chosen.iter_rows(named=True)]
     if st.button(f"查看这 {len(selection)} 个回合", type="primary", key="load_replay"):
@@ -111,7 +125,7 @@ def _render_comparison_replay(matches, rounds, selected, step, spec, images, anc
                 st.error(f"{match_label(match)}：{error}")
         progress.empty()
     try:
-        payload = comparison_payload(matches, selection, step, spec, images, anchor, show_utility)
+        payload = comparison_payload(matches, selection, step, spec, images, anchor, show_utility, max_rows=max_rows)
         if any(row["fallback"] for row in payload["rounds"]):
             st.warning("部分回合缺少冻结结束 Tick，已标注回退到回合开始。")
         st.caption("播放或拖动时间轴比较同地图比赛；回合、战队和玩家按比赛独立选择。")

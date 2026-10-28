@@ -48,6 +48,7 @@ with st.sidebar:
     files = st.file_uploader("选择或拖入 CS2 录像（可多选）", type=["dem"], accept_multiple_files=True, key="demo_upload",
                               help=f"上传已解压的 .dem 文件，单个文件最多 {MAX_UPLOAD_MIB} MiB。")
     st.caption("录像会上传到运行本应用的服务器进行分析，无需填写文件路径。")
+    st.caption("分析完成后，可点 × 移除待上传文件以释放上传缓冲；已分析比赛会保留。")
     parse_clicked = st.button("上传并分析", type="primary", disabled=not files or len(files) > MAX_UPLOAD_BATCH,
                               key="parse_demo")
     st.caption(f"每批最多 {MAX_UPLOAD_BATCH} 份录像，逐份分析。追加上传不会顶替已分析的比赛；相同内容复用缓存。")
