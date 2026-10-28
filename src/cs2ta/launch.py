@@ -9,6 +9,7 @@ import sys
 
 from cs2ta.release import production_ready, runtime_lock
 from cs2ta.runtime import settings, version_label
+from cs2ta.uploads import MAX_UPLOAD_MIB
 
 
 def main() -> int:
@@ -25,6 +26,7 @@ def main() -> int:
         os.environ["CS2TA_ENV"] = args.environment
         command = [sys.executable, "-m", "streamlit", "run", "app.py",
                    "--server.address", "127.0.0.1", "--server.port", str(config.port),
+                   "--server.maxUploadSize", str(MAX_UPLOAD_MIB),
                    "--server.headless", "true", "--browser.gatherUsageStats", "false"]
         if args.environment == "prod":
             command.extend(["--server.fileWatcherType", "none", "--server.runOnSave", "false"])
