@@ -16,6 +16,7 @@ from cs2ta.frames import missing, read_parquet
 from cs2ta.parser_adapter import parser_frame
 from cs2ta.round_context import CONTEXT_PROPS, build_round_context, color_index
 from cs2ta.runtime import settings
+from cs2ta.replay_data import load_round_index
 
 SCHEMA_VERSION = "mvp-2"
 EVENT_NAMES = [
@@ -139,14 +140,8 @@ def ingest(path: str | Path, data_dir: str | Path | None = None) -> tuple[Path, 
 
 
 def load_dataset(destination: Path) -> tuple[pl.DataFrame, pl.DataFrame]:
-    if not (destination / "manifest.json").is_file():
-        raise ValueError("数据集尚未完成解析。")
-    events, rounds = read_parquet(destination / "events.parquet"), read_parquet(destination / "rounds.parquet")
-    for name in ("round_context.parquet", "round-economy-v1.parquet"):
-        path = destination / name
-        if path.is_file():
-            rounds = rounds.join(read_parquet(path), on="round_id", how="left", validate="1:1", maintain_order="left")
-    return events, rounds
+    rounds = load_round_index(destination)
+    return read_parquet(destination / "events.parquet"), rounds
 
 
 def position_cache_path(destination: Path, round_id: int, tick_step: int) -> Path:

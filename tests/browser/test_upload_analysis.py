@@ -73,6 +73,7 @@ cli.main()
         assert len(list((tmp_path / "data/dev").glob("*/manifest.json"))) == 1
         source = next((tmp_path / "data/dev/uploads").glob("*.dem"))
         assert source.read_bytes() == b"PBDEMS2\x00valid"
+        page.get_by_text("省内存模式（适合 Streamlit Cloud）", exact=True).click()
         page.get_by_text("高级设置（通常保持默认即可）", exact=True).click()
         page.get_by_test_id("stSelectbox").filter(has=page.get_by_text("地图显示", exact=True)).get_by_role("combobox").click()
         page.get_by_role("option", name="世界坐标", exact=True).click()

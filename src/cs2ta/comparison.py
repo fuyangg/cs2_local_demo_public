@@ -6,9 +6,10 @@ from pathlib import Path
 import polars as pl
 
 from cs2ta.frames import read_parquet
-from cs2ta.pipeline import load_dataset, position_cache_path
+from cs2ta.pipeline import position_cache_path
 from cs2ta.playback import MAX_PLAYBACK_ROWS, playback_payload
 from cs2ta.round_context import filter_rounds
+from cs2ta.replay_data import load_round_index, check_position_budget, read_round_window
 
 
 def match_label(match):
@@ -28,7 +29,7 @@ def comparison_rounds(matches):
     same_map(matches)
     frames, offset = [], 0
     for match in matches:
-        _, rounds = load_dataset(Path(match["destination"]))
+        rounds = load_round_index(Path(match["destination"]))
         frames.append(rounds.with_columns(
             pl.col("round_id").alias("source_round_id"),
             pl.Series("round_id", range(offset + 1, offset + len(rounds) + 1), dtype=pl.Int64),
@@ -65,7 +66,7 @@ def filter_comparison(rounds, team, side, phase, economy):
 
 
 def comparison_payload(matches, selection, tick_step, radar=None, images=None,
-                       alignment="freeze_end", include_utility=False):
+                       alignment="freeze_end", include_utility=False, *, max_rows=None):
     map_name = same_map(matches)
     if not selection or len(selection) > 20 or len(set(selection)) != len(selection):
         raise ValueError("请选择 1–20 个不同回合。")
@@ -75,7 +76,12 @@ def comparison_payload(matches, selection, tick_step, radar=None, images=None,
     grouped = {}
     for mid, rid in selection:
         grouped.setdefault(mid, []).append(rid)
-    parts, total = [], 0
+    limit = MAX_PLAYBACK_ROWS if max_rows is None else min(MAX_PLAYBACK_ROWS, max_rows)
+    all_paths = {f"{match_label(by_id[mid])} R{rid}":
+                 position_cache_path(Path(by_id[mid]["destination"]), rid, tick_step)
+                 for mid, ids in grouped.items() for rid in ids}
+    check_position_budget(all_paths, limit)
+    parts = []
     for mid, ids in grouped.items():
         match = by_id[mid]
         destination = Path(match["destination"])
@@ -85,22 +91,20 @@ def comparison_payload(matches, selection, tick_step, radar=None, images=None,
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         if str(manifest["header"].get("map_name") or "").strip().lower() != map_name:
             raise ValueError("比赛与缓存地图不一致，请重新上传分析。")
-        events, rounds = load_dataset(destination)
+        rounds = load_round_index(destination)
         states = {}
         for rid in ids:
             path = position_cache_path(destination, rid, tick_step)
             if not path.is_file():
                 raise FileNotFoundError(f"{match_label(match)} R{rid} 的位置缓存尚未准备好。")
-            total += pl.scan_parquet(path).select(pl.len()).collect().item()
-            if total > MAX_PLAYBACK_ROWS:
-                raise ValueError("所选位置超过 100 万条，请减少回合数或增大采样间隔。")
             states[rid] = read_parquet(path)
         utility_path = destination / "utility-tracks-v1.parquet"
         if include_utility and not utility_path.is_file():
             raise FileNotFoundError(f"{match_label(match)} 的道具缓存尚未准备好。")
+        chosen_rounds = rounds.filter(pl.col("round_id").is_in(ids))
         part = playback_payload(states, rounds, tick_step, radar, images if not parts else {}, alignment,
-            utility_tracks=read_parquet(utility_path) if include_utility else None,
-            events=events if include_utility else None)
+            utility_tracks=read_round_window(utility_path, chosen_rounds) if include_utility else None,
+            events=read_round_window(destination / "events.parquet", chosen_rounds) if include_utility else None)
         prefix = mid + ":"
         for player in part["players"]:
             player["steamid"] = player["id"]
