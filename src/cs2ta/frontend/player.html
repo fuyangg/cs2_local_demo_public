@@ -75,6 +75,8 @@ function slotColor(id){return Number.isInteger(id)&&id>=0&&id<=4?SLOT_COLORS[id]
 function strokeStyleFor(sample){return {color:slotColor(sample[7]),dash:sample[6]===2?[8,5]:sample[6]===3?[]:[2,4]};}
 const selectedPlayers=new Set(INITIAL.players||DATA.players.map(p=>p.id)), selectedRounds=new Set(INITIAL.rounds||DATA.rounds.map(r=>r.id));
 const names=new Map(DATA.players.map(p=>[p.id,p.name]));
+function roundLabel(round){return round.label||"R"+round.id;}
+const roundLabels=new Map(DATA.rounds.map(r=>[r.id,roundLabel(r)]));
 let time=Math.max(0,Math.min(DATA.maxTick,INITIAL.time||0)), playing=false, previousFrame=null, request=null, dirty=true, markers=[], utilityMarkers=[], drawCount=0;
 let zoom=1, panX=0, panY=0, drag=null, resumeAfterSeek=false;
 const images={};
@@ -153,7 +155,7 @@ function utilityVisible(point){return point&&visible([0,...point]);}
 function utilityDescription(item,round){
  const p=item.point,raw=p?(DATA.map?[p[0]*DATA.map.scale+DATA.map.posX,DATA.map.posY-p[1]*DATA.map.scale,p[2]]:[p[0],-p[1],p[2]]):null;
  const position=raw?raw.map(v=>Number.isFinite(v)?v.toFixed(0):"未知").join(" / "):"坐标缺失";
- return "R"+round.id+" · "+UTILITY_TYPES[item.kind].label+" · "+(names.get(item.player)||item.name||"投掷者未知")+" · Tick "+(item.effectTick??item.samples.at(-1)?.[0]??item.start)+" · "+(item.confirmed?"爆开位置":"最后观测（未确认落点）")+" XYZ "+position;
+ return roundLabel(round)+" · "+UTILITY_TYPES[item.kind].label+" · "+(names.get(item.player)||item.name||"投掷者未知")+" · Tick "+(item.effectTick??item.samples.at(-1)?.[0]??item.start)+" · "+(item.confirmed?"爆开位置":"最后观测（未确认落点）")+" XYZ "+position;
 }
 function utilityEntries(){
  const entries=[];
@@ -237,10 +239,10 @@ function draw(){
    ctx.setLineDash(p[6]===2?[3,2]:[]);ctx.strokeStyle="#e4edf5";ctx.lineWidth=1.5;ctx.stroke();ctx.setLineDash([]);
    ctx.font="bold 9px system-ui";ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillStyle="#0d1420";ctx.fillText(Number.isInteger(p[7])?String(p[7]):"?",x,y);ctx.textBaseline="alphabetic";
    if(p[4]!==true){ctx.beginPath();ctx.moveTo(x-4,y-4);ctx.lineTo(x+4,y+4);ctx.moveTo(x+4,y-4);ctx.lineTo(x-4,y+4);ctx.strokeStyle="white";ctx.lineWidth=1.5;ctx.stroke();}
-   if($("names").checked||selectedPlayers.size===1){ctx.font="12px system-ui";ctx.textAlign="center";ctx.lineWidth=3;ctx.strokeStyle="#101510";ctx.fillStyle="#f4f7fb";const label=names.get(track.player)+(selectedRounds.size>1?" · R"+round.id:"");ctx.strokeText(label,x,y-12);ctx.fillText(label,x,y-12);}
+   if($("names").checked||selectedPlayers.size===1){ctx.font="12px system-ui";ctx.textAlign="center";ctx.lineWidth=3;ctx.strokeStyle="#101510";ctx.fillStyle="#f4f7fb";const label=names.get(track.player)+(selectedRounds.size>1?" · "+roundLabel(round):"");ctx.strokeText(label,x,y-12);ctx.fillText(label,x,y-12);}
    ctx.globalAlpha=1;markers.push({...marker,x,y,player:track.player,round:round.id,anchor:round.anchor});count++;
   }
-  statuses.push("R"+round.id+": "+(time>round.duration?"已结束":count+" 名可见玩家")+(round.fallback?"（起点回退）":""));
+  statuses.push(roundLabel(round)+": "+(time>round.duration?"已结束":count+" 名可见玩家")+(round.fallback?"（起点回退）":""));
  });
  $("time").textContent="进度 "+(DATA.maxTick?Math.round(time/DATA.maxTick*100):0)+"% · Tick "+Math.floor(time);$("timeline").value=String(Math.floor(time));
  $("roundStatus").textContent=statuses.join("　|　");canvas.dataset.renderTick=String(Math.floor(time));canvas.dataset.visibleMarkers=String(markers.length);canvas.dataset.drawCount=String(++drawCount);
@@ -280,7 +282,7 @@ DATA.rounds.forEach((round,index)=>{
  const check=document.createElement("input");check.type="checkbox";check.checked=selectedRounds.has(round.id);check.dataset.round=String(round.id);
  check.onchange=()=>{if(check.checked)selectedRounds.add(round.id);else selectedRounds.delete(round.id);schedule();};
  label.title=(round.teamAName||"队伍 A")+" "+(round.teamASide===2?"T":round.teamASide===3?"CT":"未知阵营")+" · "+(round.isOvertime===null?"阶段未知":round.isOvertime?"加时":"常规");
- label.append(check,document.createTextNode("R"+round.id+(round.isOvertime?" · 加时":"")+(round.fallback?" · 起点回退":"")));$("rounds").append(label);
+ label.append(check,document.createTextNode(roundLabel(round)+(round.isOvertime?" · 加时":"")+(round.fallback?" · 起点回退":"")));$("rounds").append(label);
 });
 function syncPlayers(){for(const check of $("players").querySelectorAll("input"))check.checked=selectedPlayers.has(check.dataset.player);schedule();}
 const teamGroups=new Map();
@@ -343,7 +345,7 @@ canvas.addEventListener("pointermove",event=>{
   tooltip.style.left=Math.max(0,Math.min(width()-220,x+14))+"px";tooltip.style.top=Math.max(0,y-80)+"px";tooltip.style.display="block";return;
  }
  const p=marker.sample,rawX=DATA.map?p[1]*DATA.map.scale+DATA.map.posX:p[1],rawY=DATA.map?DATA.map.posY-p[2]*DATA.map.scale:-p[2];
- tooltip.textContent=names.get(marker.player)+" · R"+marker.round+" · "+(p[6]===2?"T":p[6]===3?"CT":"未知阵营")+" · 编号 "+(p[7]??"未知")+"\n观测 Tick "+(marker.anchor+p[0])+" · HP "+(p[5]??"未知")+"\nX "+rawX.toFixed(1)+" / Y "+rawY.toFixed(1)+" / Z "+(p[3]??"未知")+(marker.interpolated?"\n位置经过显示插值":"");
+ tooltip.textContent=names.get(marker.player)+" · "+roundLabels.get(marker.round)+" · "+(p[6]===2?"T":p[6]===3?"CT":"未知阵营")+" · 编号 "+(p[7]??"未知")+"\n观测 Tick "+(marker.anchor+p[0])+" · HP "+(p[5]??"未知")+"\nX "+rawX.toFixed(1)+" / Y "+rawY.toFixed(1)+" / Z "+(p[3]??"未知")+(marker.interpolated?"\n位置经过显示插值":"");
  tooltip.style.left=Math.max(0,Math.min(width()-220,x+14))+"px";tooltip.style.top=Math.max(0,y-80)+"px";tooltip.style.display="block";
 });
 canvas.addEventListener("pointerleave",()=>{$("tooltip").style.display="none";});

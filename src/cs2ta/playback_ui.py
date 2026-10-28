@@ -1,6 +1,7 @@
 """Streamlit prepares data once; the embedded browser owns playback interaction."""
 
 from pathlib import Path
+import hashlib
 
 import polars as pl
 import streamlit as st
@@ -11,10 +12,11 @@ from cs2ta.frames import read_parquet
 from cs2ta.pipeline import parse_rounds_positions, position_cache_path, parse_utility_tracks
 from cs2ta.playback import playback_html, playback_payload
 from cs2ta.round_picker import pick_rounds
+from cs2ta.comparison import comparison_payload, comparison_rounds, match_label, same_map
 
 
 def render_round_player(destination: Path, demo: str, rounds: pl.DataFrame,
-                        default_round: int, map_name: str) -> None:
+                        default_round: int, map_name: str, *, matches=None) -> None:
     selected = pick_rounds(rounds, destination, default_round)
     with st.expander("高级设置（通常保持默认即可）"):
         a, b, c = st.columns(3)
@@ -45,6 +47,9 @@ def render_round_player(destination: Path, demo: str, rounds: pl.DataFrame,
         st.info("请选择至少一个回合。")
         return
     show_utility = st.checkbox("加载道具轨迹与落点", value=True, key="replay_utility")
+    if matches is not None:
+        _render_comparison_replay(matches, rounds, selected, step, spec, images, anchor, show_utility)
+        return
     paths = {rid: position_cache_path(destination, rid, step) for rid in selected}
     if st.button(f"查看这 {len(selected)} 个回合", type="primary", key="load_replay"):
         try:
@@ -73,3 +78,45 @@ def render_round_player(destination: Path, demo: str, rounds: pl.DataFrame,
         components.html(playback_html(payload), height=1160, scrolling=True)
     except Exception as error:
         st.error(f"无法构建回放：{error}")
+
+
+def render_comparison_player(matches):
+    map_name = same_map(matches)
+    rounds = comparison_rounds(matches)
+    if st.checkbox("隐藏已确认的预热回合", value=True):
+        rounds = rounds.filter(~pl.col("warmup").fill_null(False))
+    if rounds.is_empty():
+        st.info("没有可显示回合，请取消隐藏预热。")
+        return
+    key = hashlib.sha256("\n".join(match["id"] for match in matches).encode()).hexdigest()
+    render_round_player(Path("comparison-" + key), "", rounds, int(rounds["round_id"][0]), map_name, matches=matches)
+
+
+def _render_comparison_replay(matches, rounds, selected, step, spec, images, anchor, show_utility):
+    chosen = rounds.filter(pl.col("round_id").is_in(selected))
+    selection = [(row["match_id"], row["source_round_id"]) for row in chosen.iter_rows(named=True)]
+    if st.button(f"查看这 {len(selection)} 个回合", type="primary", key="load_replay"):
+        active = [match for match in matches if any(mid == match["id"] for mid, _ in selection)]
+        progress = st.progress(0, text="准备跨比赛回放……")
+        for index, match in enumerate(active):
+            ids = [rid for mid, rid in selection if mid == match["id"]]
+            destination = Path(match["destination"])
+            progress.progress(index / len(active), text=f"{index + 1}/{len(active)} · {match_label(match)}")
+            try:
+                if any(not position_cache_path(destination, rid, step).is_file() for rid in ids):
+                    parse_rounds_positions(match["source"], destination, ids, step)
+                if show_utility and not (destination / "utility-tracks-v1.parquet").is_file():
+                    parse_utility_tracks(match["source"], destination)
+            except Exception as error:
+                st.error(f"{match_label(match)}：{error}")
+        progress.empty()
+    try:
+        payload = comparison_payload(matches, selection, step, spec, images, anchor, show_utility)
+        if any(row["fallback"] for row in payload["rounds"]):
+            st.warning("部分回合缺少冻结结束 Tick，已标注回退到回合开始。")
+        st.caption("播放或拖动时间轴比较同地图比赛；回合、战队和玩家按比赛独立选择。")
+        components.html(playback_html(payload), height=1160, scrolling=True)
+    except FileNotFoundError as error:
+        st.info(f"{error} 点击上方加载按钮准备回放。")
+    except Exception as error:
+        st.error(f"无法构建跨比赛回放：{error}")

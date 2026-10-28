@@ -10,6 +10,7 @@ import tempfile
 MAX_UPLOAD_MIB = 2048
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MIB * 1024**2
 CHUNK_BYTES = 8 * 1024**2
+MAX_UPLOAD_BATCH = 50
 
 
 def upload_name(name: str) -> str:
@@ -62,3 +63,30 @@ def saved_upload(upload, data_dir: Path):
         finally:
             temporary.unlink(missing_ok=True)
             upload.seek(0)
+
+
+def analyze_uploads(files, matches: dict, data_dir: Path, progress=None) -> list[dict]:
+    """Append successes to this session; one failed upload cannot erase other matches."""
+    from cs2ta.pipeline import ingest
+
+    if not files or len(files) > MAX_UPLOAD_BATCH:
+        raise ValueError(f"每批请选择 1–{MAX_UPLOAD_BATCH} 份录像。")
+    results = []
+    for index, upload in enumerate(files):
+        if progress:
+            progress(index, len(files), upload.name)
+        try:
+            with saved_upload(upload, data_dir) as (source, name):
+                destination, manifest = ingest(source, data_dir)
+                mid = manifest["demo_sha256"]
+                match = {"id": mid, "name": name, "source": str(source),
+                         "destination": str(destination),
+                         "map_name": str(manifest["header"].get("map_name") or "").strip().lower(),
+                         "manifest": {**manifest, "demo_name": name}}
+                matches[mid] = match
+            results.append({"name": name, "match_id": mid, "error": None})
+        except Exception as error:
+            results.append({"name": upload.name, "match_id": None, "error": str(error)})
+    if progress:
+        progress(len(files), len(files), "完成")
+    return results

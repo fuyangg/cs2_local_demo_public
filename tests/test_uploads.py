@@ -28,6 +28,43 @@ def test_upload_is_default_and_does_not_offer_server_path_browsing():
     assert not app.text_input
     assert not app.selectbox
     assert not any("当前目录" in caption.value for caption in app.caption)
+    assert app.get("file_uploader")[0].proto.multiple_files
+
+
+def test_append_batches_deduplicate_and_failures_keep_all_prior_matches(tmp_path, monkeypatch):
+    from cs2ta import pipeline
+    from test_backend import FixtureParser
+
+    monkeypatch.setattr(pipeline, "DemoParser", FixtureParser)
+    FixtureParser.broken = False
+    matches = {}
+    first = uploads.analyze_uploads([Upload(b"PBDEMS2\x00one", "same.dem"),
+                                    Upload(b"PBDEMS2\x00two", "same.dem")], matches, tmp_path)
+    assert len(matches) == 2
+    ids = [item["match_id"] for item in first]
+    assert len(set(ids)) == 2
+    result = uploads.analyze_uploads([Upload(b"broken", "bad.dem"),
+                                     Upload(b"PBDEMS2\x00three", "third.dem")], matches, tmp_path)
+    assert result[0]["error"] and result[1]["match_id"]
+    assert len(matches) == 3 and all(mid in matches for mid in ids)
+    result = uploads.analyze_uploads([Upload(b"PBDEMS2\x00one", "renamed.dem")], matches, tmp_path)
+    assert len(matches) == 3 and result[0]["match_id"] == ids[0]
+    assert matches[ids[0]]["name"] == "renamed.dem"
+    assert len(list((tmp_path / "uploads").glob("*.dem"))) == 3
+
+
+def test_batch_limit_and_current_session_registry_are_independent(tmp_path, monkeypatch):
+    from cs2ta import pipeline
+    from test_backend import FixtureParser
+
+    monkeypatch.setattr(pipeline, "DemoParser", FixtureParser)
+    FixtureParser.broken = False
+    one, another_session = {}, {}
+    uploads.analyze_uploads([Upload(b"PBDEMS2\x00one")], one, tmp_path)
+    assert len(one) == 1 and not another_session
+    with pytest.raises(ValueError, match="1–50"):
+        uploads.analyze_uploads([Upload(b"PBDEMS2\x00one")] * 51, one, tmp_path)
+    assert len(one) == 1
 
 
 def test_uploads_use_content_identity_and_never_filename_as_server_path(tmp_path):
