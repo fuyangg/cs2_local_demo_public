@@ -7,12 +7,13 @@ import streamlit as st
 
 from cs2ta.analysis import events_for_round, kill_summary
 from cs2ta.frames import read_parquet
-from cs2ta.pipeline import ingest, load_dataset, parse_round_positions, position_cache_path
-from cs2ta.playback_ui import render_round_player
+from cs2ta.pipeline import load_dataset, parse_round_positions, position_cache_path
+from cs2ta.playback_ui import render_round_player, render_comparison_player
 from cs2ta.radar import ASSET_VERSION, RADARS, download_radars, level_mask, position_figure, radar_path
 from cs2ta.runtime import settings, version_label
 from cs2ta.release import production_ready
-from cs2ta.uploads import MAX_UPLOAD_MIB, saved_upload
+from cs2ta.uploads import MAX_UPLOAD_MIB, MAX_UPLOAD_BATCH, analyze_uploads
+from cs2ta.comparison import match_label
 
 st.set_page_config(page_title="CS2 录像上传分析", page_icon="🎯", layout="wide")
 runtime = settings()
@@ -26,7 +27,16 @@ if runtime.environment == "prod":
         st.error(f"稳定版启动检查未通过：{error}")
         st.stop()
 st.title("CS2 回合回放")
-st.caption("上传比赛录像，由服务器分析后选择回合，查看地图上的玩家移动。")
+st.caption("上传多份录像，由服务器分析后选择同地图比赛，叠加比较回合轨迹。")
+matches = st.session_state.setdefault("uploaded_matches", {})
+# Preserve an already analyzed single match when upgrading an active session.
+if not matches and "dataset" in st.session_state:
+    old_destination, old_manifest, old_source = st.session_state["dataset"]
+    mid = old_manifest["demo_sha256"]
+    matches[mid] = {"id": mid, "name": old_manifest["demo_name"], "source": old_source,
+                    "destination": old_destination, "manifest": old_manifest,
+                    "map_name": str(old_manifest["header"].get("map_name") or "").strip().lower()}
+selected_matches = []
 
 with st.sidebar:
     if runtime.environment == "prod":
@@ -35,28 +45,72 @@ with st.sidebar:
         st.info("开发预览 · DEV")
     st.caption(version_label())
     st.header("1. 上传比赛录像")
-    upload = st.file_uploader("选择或拖入 CS2 录像", type=["dem"], key="demo_upload",
+    files = st.file_uploader("选择或拖入 CS2 录像（可多选）", type=["dem"], accept_multiple_files=True, key="demo_upload",
                               help=f"上传已解压的 .dem 文件，单个文件最多 {MAX_UPLOAD_MIB} MiB。")
     st.caption("录像会上传到运行本应用的服务器进行分析，无需填写文件路径。")
-    parse_clicked = st.button("上传并分析", type="primary", disabled=upload is None, key="parse_demo")
-    st.caption("首次分析可能需要数分钟；重复上传同一份录像会复用分析缓存。")
+    parse_clicked = st.button("上传并分析", type="primary", disabled=not files or len(files) > MAX_UPLOAD_BATCH,
+                              key="parse_demo")
+    st.caption(f"每批最多 {MAX_UPLOAD_BATCH} 份录像，逐份分析。追加上传不会顶替已分析的比赛；相同内容复用缓存。")
+    if len(files) > MAX_UPLOAD_BATCH:
+        st.warning(f"请将每批录像减少到 {MAX_UPLOAD_BATCH} 份以内。")
+    if parse_clicked:
+        with st.status("正在分析本批录像……", expanded=True) as status:
+            progress = st.progress(0, text="准备上传分析……")
+            results = analyze_uploads(files, matches, runtime.data_dir,
+                lambda index, total, name: progress.progress(index / total,
+                    text=f"已完成 {index}/{total} · {name}"))
+            st.session_state["upload_results"] = results
+            succeeded = [row["match_id"] for row in results if row["match_id"]]
+            progress.empty()
+            status.update(label=f"本批次：{len(succeeded)} 成功 / {len(results) - len(succeeded)} 失败",
+                          state="complete" if succeeded else "error", expanded=False)
+            if succeeded:
+                map_name = matches[succeeded[-1]]["map_name"]
+                st.session_state["upload_map"] = map_name
+                key = f"upload_matches:{map_name}"
+                previous = st.session_state.get(key, [mid for mid, item in matches.items() if item["map_name"] == map_name])
+                chosen = list(dict.fromkeys(previous + [mid for mid in succeeded if matches[mid]["map_name"] == map_name]))
+                st.session_state[key] = chosen if map_name else chosen[:1]
+    if "upload_results" in st.session_state:
+        with st.expander("最近一批的逐文件结果", expanded=any(row["error"] for row in st.session_state["upload_results"])):
+            for row in st.session_state["upload_results"]:
+                if row["error"]:
+                    st.error(f"{row['name']} · 上传分析失败：{row['error']}")
+                else:
+                    st.write(f"✓ {row['name']} · {matches[row['match_id']]['map_name'] or '地图未知'}")
+    if matches:
+        st.header("2. 选择分析比赛")
+        st.caption(f"本次会话已保留 {len(matches)} 场比赛。移除待上传文件不会删除已分析的比赛。")
+        maps = sorted({item["map_name"] for item in matches.values()})
+        if st.session_state.get("upload_map") not in maps:
+            st.session_state.pop("upload_map", None)
+        map_name = st.selectbox("地图", maps, key="upload_map",
+            format_func=lambda value: value or "地图未知（仅支持单场查看）")
+        available = {mid: item for mid, item in matches.items() if item["map_name"] == map_name}
+        key = f"upload_matches:{map_name}"
+        if key in st.session_state:
+            retained = [mid for mid in st.session_state[key] if mid in available]
+            st.session_state[key] = retained if map_name else retained[:1]
+        defaults = {} if key in st.session_state else {"default": list(available) if map_name else list(available)[:1]}
+        ids = st.multiselect("参与回放的比赛", list(available), key=key,
+            format_func=lambda mid: match_label(available[mid]), max_selections=1 if not map_name else None, **defaults)
+        selected_matches = [available[mid] for mid in ids]
+        st.caption("同地图可以合并选择回合，合计最多 20 个；只选一场可查看比赛详情。")
+        if len(selected_matches) == 1:
+            item = selected_matches[0]
+            st.session_state["dataset"] = (item["destination"], item["manifest"], item["source"])
+        elif not selected_matches:
+            st.info("请选择至少一场比赛。")
+            st.stop()
 
-if parse_clicked:
-    # Invalidate prior result first so failed parsing cannot leave an old match visible.
-    st.session_state.pop("dataset", None)
+if len(selected_matches) > 1:
+    st.subheader(selected_matches[0]["map_name"])
+    st.caption(f"已选择 {len(selected_matches)} 场比赛；回合、玩家和道具按比赛分别标识。")
     try:
-        with st.status("正在分析上传的录像……", expanded=True) as status:
-            st.write("检查文件并保存上传内容……")
-            with saved_upload(upload, runtime.data_dir) as (source, name):
-                st.write("解析比赛事件、回合与经济数据……")
-                destination, manifest = ingest(source, runtime.data_dir)
-                # Keep the user-facing name even when identical contents were uploaded under another name.
-                manifest = {**manifest, "demo_name": name}
-                st.session_state["dataset"] = (str(destination), manifest, str(source))
-            status.update(label="分析完成，可以选择回合了。", state="complete", expanded=False)
+        render_comparison_player(selected_matches)
     except Exception as error:
-        st.error(f"上传分析失败：{error}")
-        st.info("请确认上传的是完整、已解压的 CS2 .dem 文件，然后重新上传并分析。")
+        st.error(f"无法读取对比比赛：{error}")
+    st.stop()
 
 if "dataset" not in st.session_state:
     st.info("在左侧选择或拖入 .dem 录像，再点击「上传并分析」。")
