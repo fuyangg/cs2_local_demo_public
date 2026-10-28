@@ -1,8 +1,15 @@
-from pathlib import Path
-
 from streamlit.testing.v1 import AppTest
 
 from cs2ta import local_files
+
+
+# Retain coverage for the optional local-picker component; the application uses browser upload.
+PICKER_APP = '''
+import streamlit as st
+from cs2ta.local_files import demo_picker
+demo = demo_picker()
+st.button("打开比赛", disabled=not demo.strip(), key="parse_demo")
+'''
 
 
 def test_directory_navigation_does_not_reuse_a_file_from_another_directory(tmp_path, monkeypatch):
@@ -12,7 +19,7 @@ def test_directory_navigation_does_not_reuse_a_file_from_another_directory(tmp_p
     sub.mkdir()
     (sub / "second.DEM").write_bytes(b"fixture")
     monkeypatch.setattr(local_files, "default_browse_directory", lambda: tmp_path)
-    app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py"))
+    app = AppTest.from_string(PICKER_APP)
     app.run()
     assert not app.exception
     assert app.button(key="parse_demo").disabled
@@ -30,7 +37,7 @@ def test_directory_navigation_does_not_reuse_a_file_from_another_directory(tmp_p
 
 def test_empty_directory_and_manual_path(tmp_path, monkeypatch):
     monkeypatch.setattr(local_files, "default_browse_directory", lambda: tmp_path)
-    app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py"))
+    app = AppTest.from_string(PICKER_APP)
     app.run()
     assert not app.exception
     assert app.button(key="parse_demo").disabled

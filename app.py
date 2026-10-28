@@ -7,14 +7,14 @@ import streamlit as st
 
 from cs2ta.analysis import events_for_round, kill_summary
 from cs2ta.frames import read_parquet
-from cs2ta.local_files import demo_picker
 from cs2ta.pipeline import ingest, load_dataset, parse_round_positions, position_cache_path
 from cs2ta.playback_ui import render_round_player
 from cs2ta.radar import ASSET_VERSION, RADARS, download_radars, level_mask, position_figure, radar_path
 from cs2ta.runtime import settings, version_label
 from cs2ta.release import production_ready
+from cs2ta.uploads import MAX_UPLOAD_MIB, saved_upload
 
-st.set_page_config(page_title="CS2 本地战术分析 MVP", page_icon="🎯", layout="wide")
+st.set_page_config(page_title="CS2 录像上传分析", page_icon="🎯", layout="wide")
 runtime = settings()
 if runtime.environment != "prod" and (Path.cwd() / ".runtime/deployment.json").is_file():
     st.error("这是稳定版目录，请使用 scripts/run-prod.sh 启动；开发请回到 dev 目录。")
@@ -26,7 +26,7 @@ if runtime.environment == "prod":
         st.error(f"稳定版启动检查未通过：{error}")
         st.stop()
 st.title("CS2 回合回放")
-st.caption("打开比赛录像，选择回合，查看地图上的玩家移动。")
+st.caption("上传比赛录像，由服务器分析后选择回合，查看地图上的玩家移动。")
 
 with st.sidebar:
     if runtime.environment == "prod":
@@ -34,25 +34,32 @@ with st.sidebar:
     else:
         st.info("开发预览 · DEV")
     st.caption(version_label())
-    st.header("1. 打开比赛录像")
-    demo = demo_picker()
-    st.caption("直接读取运行此应用的电脑上的文件，无需网页上传。")
-    parse_clicked = st.button("打开比赛", type="primary", disabled=not demo.strip(), key="parse_demo")
-    st.caption("首次解析可能需要数分钟；结果只缓存在当前电脑的 data/。")
+    st.header("1. 上传比赛录像")
+    upload = st.file_uploader("选择或拖入 CS2 录像", type=["dem"], key="demo_upload",
+                              help=f"上传已解压的 .dem 文件，单个文件最多 {MAX_UPLOAD_MIB} MiB。")
+    st.caption("录像会上传到运行本应用的服务器进行分析，无需填写文件路径。")
+    parse_clicked = st.button("上传并分析", type="primary", disabled=upload is None, key="parse_demo")
+    st.caption("首次分析可能需要数分钟；重复上传同一份录像会复用分析缓存。")
 
 if parse_clicked:
     # Invalidate prior result first so failed parsing cannot leave an old match visible.
     st.session_state.pop("dataset", None)
     try:
-        with st.spinner("读取比赛事件并建立本地缓存……"):
-            destination, manifest = ingest(demo.strip())
-        st.session_state["dataset"] = (str(destination), manifest, demo.strip())
+        with st.status("正在分析上传的录像……", expanded=True) as status:
+            st.write("检查文件并保存上传内容……")
+            with saved_upload(upload, runtime.data_dir) as (source, name):
+                st.write("解析比赛事件、回合与经济数据……")
+                destination, manifest = ingest(source, runtime.data_dir)
+                # Keep the user-facing name even when identical contents were uploaded under another name.
+                manifest = {**manifest, "demo_name": name}
+                st.session_state["dataset"] = (str(destination), manifest, str(source))
+            status.update(label="分析完成，可以选择回合了。", state="complete", expanded=False)
     except Exception as error:
-        st.error(f"解析失败：{error}")
-        st.info("请确认文件已复制完、已解压且为 CS2 Demo。若仍失败，请在终端运行 README 中的 CLI 命令查看错误。")
+        st.error(f"上传分析失败：{error}")
+        st.info("请确认上传的是完整、已解压的 CS2 .dem 文件，然后重新上传并分析。")
 
 if "dataset" not in st.session_state:
-    st.info("在左侧选择录像文件，然后点击「打开比赛」。也可以切换为输入路径。")
+    st.info("在左侧选择或拖入 .dem 录像，再点击「上传并分析」。")
     st.markdown("当前版本提供比赛概览、完整回合列表、击杀与道具事件，以及按回合提取的二维玩家轨迹。")
     st.stop()
 
